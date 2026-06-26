@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Restore at Home Lead Tracker</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <section id="login-view" class="login-card" aria-labelledby="login-title">
+        <div class="brand-mark">RAH</div>
+        <h1 id="login-title">Restore at Home</h1>
+        <p class="muted">Lead tracker for mobile physiotherapy inquiries.</p>
+        <form id="login-form" novalidate>
+          <label for="password">Demo password</label>
+          <input id="password" type="password" autocomplete="current-password" placeholder="Enter password" required />
+          <p id="login-error" class="error" role="alert"></p>
+          <button type="submit">Unlock tracker</button>
+        </form>
+        <p class="hint">Default password: <strong>restore-demo</strong>. Change it in <code>app.js</code> before real use.</p>
+      </section>
+
+      <section id="app-view" class="hidden">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">Restore at Home</p>
+            <h1>Lead Tracker</h1>
+            <p class="muted">Simple admin tracking — not a medical record.</p>
+          </div>
+          <div class="topbar-actions">
+            <button id="export-filtered" class="secondary">Export filtered CSV</button>
+            <button id="export-all" class="secondary">Export all CSV</button>
+            <button id="logout" class="ghost">Log out</button>
+          </div>
+        </header>
+
+        <section class="dashboard" aria-label="Lead summary">
+          <article><span id="total-leads">0</span><p>Total leads</p></article>
+          <article><span id="booked-leads">0</span><p>Booked</p></article>
+          <article><span id="followup-leads">0</span><p>Follow-up needed</p></article>
+          <article><span id="overdue-leads">0</span><p>Overdue follow-ups</p></article>
+          <article><span id="upcoming-leads">0</span><p>Upcoming follow-ups</p></article>
+        </section>
+
+        <section class="content-grid">
+          <form id="lead-form" class="panel" novalidate>
+            <div class="panel-heading">
+              <h2 id="form-title">Add lead</h2>
+              <button type="button" id="cancel-edit" class="ghost hidden">Cancel edit</button>
+            </div>
+            <input type="hidden" id="lead-id" />
+            <div class="form-grid">
+              <label>Name *<input id="name" required placeholder="Jane Smith" /></label>
+              <label>Phone *<input id="phone" required inputmode="tel" placeholder="555-123-4567" /></label>
+              <label>Email<input id="email" type="email" placeholder="jane@example.com" /></label>
+              <label>Location *<input id="location" required placeholder="Denver, CO" /></label>
+              <label>Referral source<input id="referralSource" list="referral-options" placeholder="Google" /></label>
+              <datalist id="referral-options"></datalist>
+              <label>Condition / reason *<input id="condition" required placeholder="Post-op knee rehab" /></label>
+              <label>Status *<select id="status" required></select></label>
+              <label>Lead priority *<select id="priority" required></select></label>
+              <label>Next follow-up date<input id="nextFollowUp" type="date" /></label>
+              <label class="full-width">Notes<textarea id="notes" rows="4" placeholder="Best time to call, admin reminders, etc."></textarea></label>
+            </div>
+            <p id="form-error" class="error" role="alert"></p>
+            <button type="submit" id="save-lead">Save lead</button>
+          </form>
+
+          <section class="panel list-panel">
+            <div class="panel-heading stacked">
+              <div>
+                <h2>Leads</h2>
+                <p class="muted"><span id="result-count">0</span> showing</p>
+              </div>
+            </div>
+            <div class="filters">
+              <input id="search" type="search" placeholder="Search name, phone, email, location, condition, notes" />
+              <select id="filter-status"><option value="">All statuses</option></select>
+              <select id="filter-referral"><option value="">All referral sources</option></select>
+              <select id="filter-priority"><option value="">All priorities</option></select>
+              <input id="filter-followup" type="date" aria-label="Filter by next follow-up date" />
+              <select id="sort-by">
+                <option value="newest">Newest</option>
+                <option value="followup">Next follow-up date</option>
+                <option value="status">Status</option>
+                <option value="priority">Priority</option>
+              </select>
+              <button id="clear-filters" type="button" class="ghost">Clear</button>
+            </div>
+            <div id="empty-state" class="empty hidden">No leads match your current filters.</div>
+            <div id="lead-list" class="lead-list"></div>
+          </section>
+        </section>
+      </section>
+    </main>
+    <script src="app.js"></script>
+  </body>
+</html>
