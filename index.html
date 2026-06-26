@@ -57,6 +57,7 @@
               <label>Location *<input id="location" required placeholder="Denver, CO" /></label>
               <label>Referral source<input id="referralSource" list="referral-options" placeholder="Google" /></label>
               <datalist id="referral-options"></datalist>
+              <label>Lead type *<select id="leadType" required></select></label>
               <label>Condition / reason *<input id="condition" required placeholder="Post-op knee rehab" /></label>
               <label>Status *<select id="status" required></select></label>
               <label>Lead priority *<select id="priority" required></select></label>
@@ -79,6 +80,7 @@
               <select id="filter-status"><option value="">All statuses</option></select>
               <select id="filter-referral"><option value="">All referral sources</option></select>
               <select id="filter-priority"><option value="">All priorities</option></select>
+              <select id="filter-lead-type"><option value="">New or returning</option></select>
               <input id="filter-followup" type="date" aria-label="Filter by next follow-up date" />
               <select id="sort-by">
                 <option value="newest">Newest</option>

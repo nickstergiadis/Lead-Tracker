@@ -5,9 +5,9 @@ A simple, mobile-friendly lead/admin tracker for the Restore at Home mobile phys
 ## Features
 
 - Add, edit, and delete leads
-- Track name, phone, email, location, referral source, condition/reason for inquiry, status, priority, next follow-up date, and notes
+- Track name, phone, email, location, referral source, new/returning lead type, condition/reason for inquiry, status, priority, next follow-up date, and notes
 - Search by name, phone, email, location, condition, or notes
-- Filter by status, referral source, priority, and next follow-up date
+- Filter by status, referral source, priority, new/returning lead type, and next follow-up date
 - Sort by newest, next follow-up date, status, or priority
 - Dashboard cards for total, booked, follow-up needed, overdue follow-ups, and upcoming follow-ups
 - Export all leads or the currently filtered list to CSV
@@ -49,4 +49,4 @@ Use **Export all CSV** to download every saved lead. Use **Export filtered CSV**
 
 - Change the demo password in `app.js` by updating `DEMO_PASSWORD`.
 - Edit the sample leads in `app.js` in the `demoLeads` array.
-- Update colors and layout in `styles.css`.
+- Update brand colors, badge colors, and layout in `styles.css`.
