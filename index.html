@@ -63,16 +63,16 @@
             </div>
             <input type="hidden" id="lead-id" />
             <div class="form-grid">
-              <label>Name *<input id="name" required placeholder="Jane Smith" /></label>
-              <label>Phone *<input id="phone" required inputmode="tel" placeholder="555-123-4567" /></label>
-              <label>Email<input id="email" type="email" placeholder="jane@example.com" /></label>
-              <label>Location *<input id="location" required placeholder="Denver, CO" /></label>
+              <label>Name *<input id="name" required placeholder="Jane Smith" aria-describedby="name-error" /><span id="name-error" class="field-error"></span></label>
+              <label>Phone *<input id="phone" type="tel" required placeholder="555-123-4567" aria-describedby="phone-error" /><span id="phone-error" class="field-error"></span></label>
+              <label>Email<input id="email" type="email" placeholder="jane@example.com" aria-describedby="email-error" /><span id="email-error" class="field-error"></span></label>
+              <label>Location *<input id="location" required placeholder="Denver, CO" aria-describedby="location-error" /><span id="location-error" class="field-error"></span></label>
               <label>Referral source<input id="referralSource" list="referral-options" placeholder="Google" /></label>
               <datalist id="referral-options"></datalist>
-              <label>Lead type *<select id="leadType" required></select></label>
-              <label>Condition / reason *<input id="condition" required placeholder="Post-op knee rehab" /></label>
-              <label>Status *<select id="status" required></select></label>
-              <label>Lead priority *<select id="priority" required></select></label>
+              <label>Lead type *<select id="leadType" required aria-describedby="leadType-error"></select><span id="leadType-error" class="field-error"></span></label>
+              <label>Condition / reason *<input id="condition" required placeholder="Post-op knee rehab" aria-describedby="condition-error" /><span id="condition-error" class="field-error"></span></label>
+              <label>Status *<select id="status" required aria-describedby="status-error"></select><span id="status-error" class="field-error"></span></label>
+              <label>Lead priority *<select id="priority" required aria-describedby="priority-error"></select><span id="priority-error" class="field-error"></span></label>
               <label>Next follow-up date<input id="nextFollowUp" type="date" /></label>
               <label class="full-width">Next action<input id="nextAction" placeholder="Call to confirm availability" /></label>
               <label>Last contacted<input id="lastContactedAt" type="datetime-local" /></label>
@@ -80,6 +80,13 @@
               <label class="full-width">Notes<textarea id="notes" rows="4" placeholder="Best time to call, admin reminders, etc."></textarea></label>
             </div>
             <div id="edit-history" class="hidden"></div>
+            <div id="duplicate-warning" class="duplicate-warning hidden" role="status">
+              <p><strong>Possible duplicate.</strong> <span id="duplicate-message"></span> No records will be merged automatically.</p>
+              <div class="duplicate-actions">
+                <button type="button" id="review-duplicate" class="secondary">Review matching lead</button>
+                <button type="button" id="save-anyway">Save anyway</button>
+              </div>
+            </div>
             <p id="form-error" class="error" role="alert"></p>
             <button type="submit" id="save-lead">Save lead</button>
           </form>
