@@ -1,0 +1,7 @@
+{
+  "name": "restore-at-home-lead-tracker",
+  "private": true,
+  "scripts": {
+    "test": "node --test"
+  }
+}
