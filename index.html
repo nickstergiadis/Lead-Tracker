@@ -36,12 +36,13 @@
         </header>
 
         <section class="dashboard" aria-label="Lead summary">
-          <article><span id="total-leads">0</span><p>Total leads</p></article>
-          <article><span id="booked-leads">0</span><p>Booked</p></article>
-          <article><span id="followup-leads">0</span><p>Waiting for reply</p></article>
-          <article><span id="overdue-leads">0</span><p>Overdue follow-ups</p></article>
-          <article><span id="upcoming-leads">0</span><p>Upcoming follow-ups</p></article>
+          <button type="button" class="metric-card" data-metric-filter="open" aria-pressed="false"><span id="open-leads">0</span><strong>Open leads</strong></button>
+          <button type="button" class="metric-card" data-metric-filter="needs-action" aria-pressed="false"><span id="action-leads">0</span><strong>Needs action today</strong><small>Due today or overdue</small></button>
+          <button type="button" class="metric-card" data-metric-filter="overdue" aria-pressed="false"><span id="overdue-leads">0</span><strong>Overdue</strong></button>
+          <button type="button" class="metric-card" data-metric-filter="booked-month" aria-pressed="false"><span id="booked-month-leads">0</span><strong>Booked this month</strong></button>
+          <button type="button" class="metric-card" data-metric-filter="conversion" aria-pressed="false" aria-describedby="conversion-explanation"><span id="conversion-rate">0%</span><strong>Conversion rate</strong><small>From tracked history</small></button>
         </section>
+        <p id="conversion-explanation" class="sr-only">Conversion rate is bookings divided by qualified outcomes in tracked history. A qualified outcome is a lead with a real booked timestamp or a recorded Lost activity. Earlier booking transitions cannot be reconstructed.</p>
 
         <section class="panel daily-actions" aria-labelledby="daily-actions-title">
           <div class="panel-heading daily-actions-heading">
@@ -87,7 +88,7 @@
             <div class="panel-heading stacked">
               <div>
                 <h2>Leads</h2>
-                <p class="muted"><span id="result-count">0</span> showing</p>
+                <p id="result-summary" class="muted"><span id="result-count">0</span> showing</p>
               </div>
             </div>
             <div class="filters">

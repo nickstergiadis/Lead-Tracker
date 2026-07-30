@@ -36,14 +36,15 @@ const demoLeads = [
 let leads = loadLeads();
 let filteredLeads = [];
 let contactDialogTrigger = null;
+let activeMetricFilter = "";
 const $ = (id) => document.getElementById(id);
 
 function normalizeStatus(value) {
   if (statuses.includes(value)) return value;
   return Object.hasOwn(STATUS_MIGRATIONS, value) ? STATUS_MIGRATIONS[value] : STATUSES.NEW_INQUIRY;
 }
-function isClosedStatus(value) {
-  return [STATUSES.BOOKED, STATUSES.COMPLETED, STATUSES.LOST].includes(normalizeStatus(value));
+function isOpenLead(lead) {
+  return ![STATUSES.COMPLETED, STATUSES.LOST].includes(normalizeStatus(lead.status));
 }
 function normalizeLead(rawLead) {
   if (!rawLead || typeof rawLead !== "object" || Array.isArray(rawLead)) throw new TypeError("Invalid lead record");
@@ -116,6 +117,32 @@ function classifyFollowUp(value, now = new Date()) {
   const exactDate = followUp.date.toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" });
   return { state, dayDifference, relativeLabel, exactDate };
 }
+function isRealTimestamp(value) {
+  return typeof value === "string" && value.trim() !== "" && !Number.isNaN(new Date(value).getTime());
+}
+function calculateMetrics(records, now = new Date()) {
+  const todayOrOverdue = (lead) => isOpenLead(lead) && ["today", "overdue"].includes(classifyFollowUp(lead.nextFollowUp, now).state);
+  const overdue = (lead) => isOpenLead(lead) && classifyFollowUp(lead.nextFollowUp, now).state === "overdue";
+  const bookedThisMonth = (lead) => {
+    if (!isRealTimestamp(lead.bookedAt)) return false;
+    const booked = new Date(lead.bookedAt);
+    return booked.getFullYear() === now.getFullYear() && booked.getMonth() === now.getMonth();
+  };
+  const hasTrackedLoss = (lead) => lead.activities.some((activity) => activity.type === ACTIVITY_TYPES.LOST && isRealTimestamp(activity.activityAt));
+  // Qualified outcomes are reconstructable closed-funnel events: a real bookedAt or a tracked Lost activity.
+  const qualified = (lead) => isRealTimestamp(lead.bookedAt) || hasTrackedLoss(lead);
+  const booked = records.filter((lead) => isRealTimestamp(lead.bookedAt)).length;
+  const qualifiedCount = records.filter(qualified).length;
+  return {
+    open: records.filter(isOpenLead).length,
+    needsAction: records.filter(todayOrOverdue).length,
+    overdue: records.filter(overdue).length,
+    bookedThisMonth: records.filter(bookedThisMonth).length,
+    conversionRate: qualifiedCount ? (booked / qualifiedCount) * 100 : 0,
+    qualifiedCount,
+    predicates: { open: isOpenLead, "needs-action": todayOrOverdue, overdue, "booked-month": bookedThisMonth, conversion: qualified }
+  };
+}
 function escapeHtml(value = "") { return String(value).replace(/[&<>'"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" }[c])); }
 function normalizePhone(phone) { return phone.replace(/[\s().-]/g, ""); }
 function isValidPhone(phone) { return /^\+?\d{7,15}$/.test(normalizePhone(phone)); }
@@ -137,6 +164,7 @@ function bindEvents() {
   $("cancel-edit").addEventListener("click", resetForm);
   ["search", "filter-status", "filter-referral", "filter-priority", "filter-lead-type", "filter-followup", "sort-by"].forEach((id) => $(id).addEventListener("input", render));
   $("clear-filters").addEventListener("click", clearFilters);
+  document.querySelector(".dashboard").addEventListener("click", handleMetricFilter);
   $("export-all").addEventListener("click", () => exportCsv(leads, "restore-at-home-all-leads.csv"));
   $("export-filtered").addEventListener("click", () => exportCsv(filteredLeads, "restore-at-home-filtered-leads.csv"));
   $("lead-list").addEventListener("click", handleLeadListClick);
@@ -316,7 +344,8 @@ function announce(message) {
 function getFilteredLeads() {
   const q = $("search").value.toLowerCase();
   const fields = ["name", "phone", "email", "location", "condition", "notes", "nextAction"];
-  return leads.filter((lead) => fields.some((field) => String(lead[field] || "").toLowerCase().includes(q)))
+  const metricPredicate = calculateMetrics(leads).predicates[activeMetricFilter] || (() => true);
+  return leads.filter(metricPredicate).filter((lead) => fields.some((field) => String(lead[field] || "").toLowerCase().includes(q)))
     .filter((lead) => !$("filter-status").value || normalizeStatus(lead.status) === $("filter-status").value)
     .filter((lead) => !$("filter-referral").value || lead.referralSource === $("filter-referral").value)
     .filter((lead) => !$("filter-priority").value || lead.priority === $("filter-priority").value)
@@ -340,11 +369,13 @@ function updateReferralFilters() {
   $("filter-referral").value = current;
 }
 function renderDashboard() {
-  $("total-leads").textContent = leads.length;
-  $("booked-leads").textContent = leads.filter((l) => normalizeStatus(l.status) === STATUSES.BOOKED).length;
-  $("followup-leads").textContent = leads.filter((l) => normalizeStatus(l.status) === STATUSES.WAITING_FOR_REPLY).length;
-  $("overdue-leads").textContent = leads.filter((l) => classifyFollowUp(l.nextFollowUp).state === "overdue" && !isClosedStatus(l.status)).length;
-  $("upcoming-leads").textContent = leads.filter((l) => ["today", "future"].includes(classifyFollowUp(l.nextFollowUp).state)).length;
+  const metrics = calculateMetrics(leads);
+  $("open-leads").textContent = metrics.open;
+  $("action-leads").textContent = metrics.needsAction;
+  $("overdue-leads").textContent = metrics.overdue;
+  $("booked-month-leads").textContent = metrics.bookedThisMonth;
+  $("conversion-rate").textContent = `${Number(metrics.conversionRate.toFixed(1))}%`;
+  document.querySelectorAll("[data-metric-filter]").forEach((card) => card.setAttribute("aria-pressed", String(card.dataset.metricFilter === activeMetricFilter)));
 }
 function followUpChip(followUp) {
   const exactDate = followUp.exactDate ? ` — ${followUp.exactDate}` : "";
@@ -354,7 +385,7 @@ function renderDailyActions() {
   const priorityRank = { High: 0, Medium: 1, Low: 2 };
   const actionLeads = leads.filter((lead) => {
     const state = classifyFollowUp(lead.nextFollowUp).state;
-    return !isClosedStatus(lead.status) && (state === "overdue" || state === "today");
+    return isOpenLead(lead) && (state === "overdue" || state === "today");
   }).sort((a, b) => {
     const dayOrder = classifyFollowUp(a.nextFollowUp).dayDifference - classifyFollowUp(b.nextFollowUp).dayDifference;
     return dayOrder || (priorityRank[a.priority] ?? 3) - (priorityRank[b.priority] ?? 3) || a.name.localeCompare(b.name);
@@ -369,6 +400,15 @@ function renderLeads() {
   $("result-count").textContent = filteredLeads.length;
   $("empty-state").classList.toggle("hidden", filteredLeads.length > 0);
   $("lead-list").innerHTML = filteredLeads.map(leadCardMarkup).join("");
+}
+function handleMetricFilter(event) {
+  const card = event.target.closest("[data-metric-filter]");
+  if (!card) return;
+  activeMetricFilter = activeMetricFilter === card.dataset.metricFilter ? "" : card.dataset.metricFilter;
+  render();
+  card.focus();
+  const label = activeMetricFilter ? card.querySelector("strong").textContent : "All leads";
+  announce(`${label} filter applied. ${filteredLeads.length} ${filteredLeads.length === 1 ? "lead" : "leads"} showing.`);
 }
 function leadCardMarkup(lead) {
   const status = normalizeStatus(lead.status);
@@ -386,7 +426,7 @@ function activityHistoryMarkup(lead) {
   const items = (activities) => activities.length ? `<ol class="activity-list">${activities.map((activity) => `<li><strong>${escapeHtml(activity.type)}</strong><time datetime="${escapeHtml(activity.activityAt)}">${formatDateTime(activity.activityAt)}</time>${activity.contactMethod ? `<span>${escapeHtml(activity.contactMethod)}</span>` : ""}${activity.note ? `<p>${escapeHtml(activity.note)}</p>` : ""}</li>`).join("")}</ol>` : '<p class="muted">No activity recorded.</p>';
   return `<section class="activity-history" aria-label="Activity history"><h4>Recent activity</h4>${items(sorted.slice(0, 3))}${sorted.length > 3 ? `<details><summary>View full history (${sorted.length})</summary>${items(sorted)}</details>` : ""}</section>`;
 }
-function clearFilters() { ["search", "filter-status", "filter-referral", "filter-priority", "filter-lead-type", "filter-followup"].forEach((id) => $(id).value = ""); $("sort-by").value = "newest"; render(); }
+function clearFilters() { ["search", "filter-status", "filter-referral", "filter-priority", "filter-lead-type", "filter-followup"].forEach((id) => $(id).value = ""); $("sort-by").value = "newest"; activeMetricFilter = ""; render(); announce(`${filteredLeads.length} leads showing. Filters cleared.`); }
 function exportCsv(rows, filename) {
   const headers = ["Name", "Phone", "Email", "Location", "Referral source", "Lead type", "Condition", "Status", "Lead priority", "Next follow-up date", "Notes", "Created at"];
   const csvRows = [headers, ...rows.map((l) => [l.name, l.phone, l.email, l.location, l.referralSource, l.leadType || "New patient", l.condition, normalizeStatus(l.status), l.priority, l.nextFollowUp, l.notes, l.createdAt])]
