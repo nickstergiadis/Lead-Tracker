@@ -1,7 +1,20 @@
 const STORAGE_KEY = "restoreAtHomeLeads";
 const AUTH_KEY = "restoreAtHomeAuth";
 const DEMO_PASSWORD = "restore-demo";
-const statuses = ["New", "Contacted", "Booked", "Follow-up needed", "Not a fit", "Lost"];
+const STATUSES = Object.freeze({
+  NEW_INQUIRY: "New inquiry",
+  CONTACTED: "Contacted",
+  WAITING_FOR_REPLY: "Waiting for reply",
+  BOOKED: "Booked",
+  COMPLETED: "Completed",
+  LOST: "Lost"
+});
+const statuses = Object.freeze(Object.values(STATUSES));
+const STATUS_MIGRATIONS = Object.freeze({
+  New: STATUSES.NEW_INQUIRY,
+  "Follow-up needed": STATUSES.WAITING_FOR_REPLY,
+  "Not a fit": STATUSES.LOST
+});
 const priorities = ["Low", "Medium", "High"];
 const leadTypes = ["New patient", "Returning patient"];
 const demoLeads = [
@@ -13,7 +26,37 @@ let leads = loadLeads();
 let filteredLeads = [];
 const $ = (id) => document.getElementById(id);
 
-function loadLeads() { const saved = localStorage.getItem(STORAGE_KEY); return saved ? JSON.parse(saved) : demoLeads; }
+function normalizeStatus(value) {
+  if (statuses.includes(value)) return value;
+  return Object.hasOwn(STATUS_MIGRATIONS, value) ? STATUS_MIGRATIONS[value] : STATUSES.NEW_INQUIRY;
+}
+function isClosedStatus(value) {
+  return [STATUSES.BOOKED, STATUSES.COMPLETED, STATUSES.LOST].includes(normalizeStatus(value));
+}
+function normalizeLead(rawLead) {
+  if (!rawLead || typeof rawLead !== "object" || Array.isArray(rawLead)) throw new TypeError("Invalid lead record");
+  const originalStatus = rawLead.status;
+  const normalizedStatus = normalizeStatus(originalStatus);
+  const normalizedLead = { ...rawLead, status: normalizedStatus };
+  // Preserve unknown legacy statuses so a migration can revisit them without data loss.
+  if (normalizedStatus !== originalStatus && !Object.hasOwn(STATUS_MIGRATIONS, originalStatus)) normalizedLead.legacyStatus = originalStatus;
+  return normalizedLead;
+}
+function loadLeads() {
+  const saved = localStorage.getItem(STORAGE_KEY);
+  if (!saved) return demoLeads.map(normalizeLead);
+  try {
+    const parsed = JSON.parse(saved);
+    if (!Array.isArray(parsed)) throw new TypeError("Stored leads must be an array");
+    const normalized = parsed.map(normalizeLead);
+    // Only migrate storage after the entire payload has parsed and normalized successfully.
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(normalized));
+    return normalized;
+  } catch (error) {
+    console.error("Unable to load stored leads; leaving storage unchanged.", error);
+    return demoLeads.map(normalizeLead);
+  }
+}
 function saveLeads() { localStorage.setItem(STORAGE_KEY, JSON.stringify(leads)); }
 function todayISO() { return new Date().toISOString().slice(0, 10); }
 function escapeHtml(value = "") { return String(value).replace(/[&<>'"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" }[c])); }
@@ -73,7 +116,7 @@ function getFilteredLeads() {
   const q = $("search").value.toLowerCase();
   const fields = ["name", "phone", "email", "location", "condition", "notes"];
   return leads.filter((lead) => fields.some((field) => lead[field].toLowerCase().includes(q)))
-    .filter((lead) => !$("filter-status").value || lead.status === $("filter-status").value)
+    .filter((lead) => !$("filter-status").value || normalizeStatus(lead.status) === $("filter-status").value)
     .filter((lead) => !$("filter-referral").value || lead.referralSource === $("filter-referral").value)
     .filter((lead) => !$("filter-priority").value || lead.priority === $("filter-priority").value)
     .filter((lead) => !$("filter-lead-type").value || (lead.leadType || "New patient") === $("filter-lead-type").value)
@@ -83,7 +126,7 @@ function getFilteredLeads() {
 function sortLeads(a, b) {
   const sort = $("sort-by").value;
   if (sort === "followup") return (a.nextFollowUp || "9999-12-31").localeCompare(b.nextFollowUp || "9999-12-31");
-  if (sort === "status") return a.status.localeCompare(b.status);
+  if (sort === "status") return statuses.indexOf(normalizeStatus(a.status)) - statuses.indexOf(normalizeStatus(b.status));
   if (sort === "priority") return priorities.indexOf(b.priority) - priorities.indexOf(a.priority);
   return new Date(b.createdAt) - new Date(a.createdAt);
 }
@@ -98,20 +141,20 @@ function updateReferralFilters() {
 function renderDashboard() {
   const today = todayISO();
   $("total-leads").textContent = leads.length;
-  $("booked-leads").textContent = leads.filter((l) => l.status === "Booked").length;
-  $("followup-leads").textContent = leads.filter((l) => l.status === "Follow-up needed").length;
-  $("overdue-leads").textContent = leads.filter((l) => l.nextFollowUp && l.nextFollowUp < today && l.status !== "Booked").length;
+  $("booked-leads").textContent = leads.filter((l) => normalizeStatus(l.status) === STATUSES.BOOKED).length;
+  $("followup-leads").textContent = leads.filter((l) => normalizeStatus(l.status) === STATUSES.WAITING_FOR_REPLY).length;
+  $("overdue-leads").textContent = leads.filter((l) => l.nextFollowUp && l.nextFollowUp < today && !isClosedStatus(l.status)).length;
   $("upcoming-leads").textContent = leads.filter((l) => l.nextFollowUp && l.nextFollowUp >= today).length;
 }
 function renderLeads() {
   $("result-count").textContent = filteredLeads.length;
   $("empty-state").classList.toggle("hidden", filteredLeads.length > 0);
-  $("lead-list").innerHTML = filteredLeads.map((lead) => `<article class="lead-card"><header><div><h3>${escapeHtml(lead.name)}</h3><p class="muted">${escapeHtml(lead.condition)}</p></div><span class="badge priority-pill priority-${lead.priority.toLowerCase()}">${lead.priority}</span></header><div class="badges"><span class="badge status-${lead.status.toLowerCase().replace(/[^a-z0-9]+/g, "-")}">${lead.status}</span><span class="badge type-${(lead.leadType || "New patient").toLowerCase().replace(/[^a-z0-9]+/g, "-")}">${escapeHtml(lead.leadType || "New patient")}</span>${lead.referralSource ? `<span class="badge referral-badge">${escapeHtml(lead.referralSource)}</span>` : ""}${lead.nextFollowUp ? `<span class="badge followup-badge">Follow up ${lead.nextFollowUp}</span>` : ""}</div><div class="card-grid"><span>☎ ${escapeHtml(lead.phone)}</span><span>✉ ${escapeHtml(lead.email || "No email")}</span><span>📍 ${escapeHtml(lead.location)}</span><span>Created ${new Date(lead.createdAt).toLocaleDateString()}</span></div>${lead.notes ? `<p>${escapeHtml(lead.notes)}</p>` : ""}<div class="card-actions"><button class="secondary" onclick="editLead('${lead.id}')">Edit</button><button class="ghost" onclick="deleteLead('${lead.id}')">Delete</button></div></article>`).join("");
+  $("lead-list").innerHTML = filteredLeads.map((lead) => { const status = normalizeStatus(lead.status); return `<article class="lead-card"><header><div><h3>${escapeHtml(lead.name)}</h3><p class="muted">${escapeHtml(lead.condition)}</p></div><span class="badge priority-pill priority-${lead.priority.toLowerCase()}">${lead.priority}</span></header><div class="badges"><span class="badge status-${status.toLowerCase().replace(/[^a-z0-9]+/g, "-")}">${escapeHtml(status)}</span><span class="badge type-${(lead.leadType || "New patient").toLowerCase().replace(/[^a-z0-9]+/g, "-")}">${escapeHtml(lead.leadType || "New patient")}</span>${lead.referralSource ? `<span class="badge referral-badge">${escapeHtml(lead.referralSource)}</span>` : ""}${lead.nextFollowUp ? `<span class="badge followup-badge">Follow up ${lead.nextFollowUp}</span>` : ""}</div><div class="card-grid"><span>☎ ${escapeHtml(lead.phone)}</span><span>✉ ${escapeHtml(lead.email || "No email")}</span><span>📍 ${escapeHtml(lead.location)}</span><span>Created ${new Date(lead.createdAt).toLocaleDateString()}</span></div>${lead.notes ? `<p>${escapeHtml(lead.notes)}</p>` : ""}<div class="card-actions"><button class="secondary" onclick="editLead('${lead.id}')">Edit</button><button class="ghost" onclick="deleteLead('${lead.id}')">Delete</button></div></article>`; }).join("");
 }
 function clearFilters() { ["search", "filter-status", "filter-referral", "filter-priority", "filter-lead-type", "filter-followup"].forEach((id) => $(id).value = ""); $("sort-by").value = "newest"; render(); }
 function exportCsv(rows, filename) {
   const headers = ["Name", "Phone", "Email", "Location", "Referral source", "Lead type", "Condition", "Status", "Lead priority", "Next follow-up date", "Notes", "Created at"];
-  const csvRows = [headers, ...rows.map((l) => [l.name, l.phone, l.email, l.location, l.referralSource, l.leadType || "New patient", l.condition, l.status, l.priority, l.nextFollowUp, l.notes, l.createdAt])]
+  const csvRows = [headers, ...rows.map((l) => [l.name, l.phone, l.email, l.location, l.referralSource, l.leadType || "New patient", l.condition, normalizeStatus(l.status), l.priority, l.nextFollowUp, l.notes, l.createdAt])]
     .map((row) => row.map((cell) => `"${String(cell || "").replace(/"/g, '""')}"`).join(","));
   const blob = new Blob([csvRows.join("\n")], { type: "text/csv;charset=utf-8" });
   const url = URL.createObjectURL(blob);
