@@ -1,6 +1,4 @@
 const STORAGE_KEY = "restoreAtHomeLeads";
-const AUTH_KEY = "restoreAtHomeAuth";
-const DEMO_PASSWORD = "restore-demo";
 const STATUSES = Object.freeze({
   NEW_INQUIRY: "New inquiry",
   CONTACTED: "Contacted",
@@ -32,11 +30,6 @@ const ACTIVITY_TYPES = Object.freeze({
   LOST: "Lost"
 });
 const activityTypes = Object.freeze(Object.values(ACTIVITY_TYPES));
-const demoLeads = [
-  { id: crypto.randomUUID(), createdAt: "2026-06-20T09:00:00.000Z", name: "Amelia Grant", phone: "303-555-0198", email: "amelia@example.com", location: "Boulder", referralSource: "Google", condition: "Hip pain after fall", status: "New", priority: "High", leadType: "New patient", nextFollowUp: "2026-06-27", notes: "Prefers morning calls." },
-  { id: crypto.randomUUID(), createdAt: "2026-06-18T14:30:00.000Z", name: "Marcus Lee", phone: "720-555-0144", email: "marcus@example.com", location: "Denver", referralSource: "Physician", condition: "Post-op knee rehab", status: "Booked", priority: "Medium", leadType: "Returning patient", nextFollowUp: "2026-06-29", notes: "Booked initial visit." },
-  { id: crypto.randomUUID(), createdAt: "2026-06-16T11:15:00.000Z", name: "Priya Shah", phone: "970-555-0122", email: "", location: "Longmont", referralSource: "Friend", condition: "Balance and gait support", status: "Follow-up needed", priority: "High", leadType: "New patient", nextFollowUp: "2026-06-24", notes: "Left voicemail; call again." }
-];
 let leads = [];
 let filteredLeads = [];
 let contactDialogTrigger = null;
@@ -114,12 +107,12 @@ function normalizeLead(rawLead) {
   if (normalizedStatus !== originalStatus && !Object.hasOwn(STATUS_MIGRATIONS, originalStatus)) normalizedLead.legacyStatus = originalStatus;
   return normalizedLead;
 }
-function loadLeads() {
+function loadLegacyLeads() {
   try {
     const saved = localStorage.getItem(STORAGE_KEY);
     // A missing key is first use. An empty or otherwise invalid stored value is
     // persisted data that needs recovery and must not be replaced with examples.
-    if (saved === null) return demoLeads.map(normalizeLead);
+    if (saved === null) return [];
     const parsed = JSON.parse(saved);
     if (!Array.isArray(parsed)) throw new TypeError("Stored leads must be an array");
     return parsed.map(normalizeLead);
@@ -129,19 +122,8 @@ function loadLeads() {
     return [];
   }
 }
-function saveLeads(records = leads) {
-  if (storageRecoveryError) {
-    console.error("Lead data was not written while stored data awaits recovery.");
-    return false;
-  }
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(records));
-    return true;
-  } catch {
-    console.error("Lead data could not be written to storage.");
-    return false;
-  }
-}
+async function api(path, options = {}) { const response = await fetch(`/api${path}`, { credentials: "same-origin", headers: { "Content-Type": "application/json", ...(options.headers || {}) }, ...options }); if (response.status === 401) { showAuthenticatedView(false); throw new Error("Authentication required"); } const body = await response.json().catch(() => ({})); if (!response.ok) throw Object.assign(new Error(body.error || "Request failed"), { fields: body.fields }); return body; }
+async function refreshLeads() { const result = await api("/leads"); leads = result.leads.map(normalizeLead); render(); }
 function localDateParts(date = new Date()) {
   return { year: date.getFullYear(), month: date.getMonth() + 1, day: date.getDate() };
 }
@@ -235,19 +217,18 @@ function normalizePhone(phone) { return normalizePhoneForMatch(phone); }
 function isValidPhone(phone) { return /^\d{7,15}$/.test(normalizePhoneForMatch(phone)); }
 function isValidEmail(email) { return !email || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email); }
 
-function init() {
-  leads = loadLeads();
+async function init() {
   statuses.forEach((status) => [$("status"), $("filter-status")].forEach((el) => el.add(new Option(status, status))));
   priorities.forEach((priority) => [$("priority"), $("filter-priority")].forEach((el) => el.add(new Option(priority, priority))));
   leadTypes.forEach((type) => [$("leadType"), $("filter-lead-type")].forEach((el) => el.add(new Option(type, type))));
   CONTACT_METHODS.forEach((method) => $("lastContactMethod").add(new Option(method, method)));
   CONTACT_METHODS.forEach((method) => $("contact-method").add(new Option(method, method)));
   bindEvents();
-  showAuthenticatedView();
+  try { await api("/session"); showAuthenticatedView(true); await refreshLeads(); } catch { showAuthenticatedView(false); }
 }
 function bindEvents() {
   $("login-form").addEventListener("submit", handleLogin);
-  $("logout").addEventListener("click", () => { sessionStorage.removeItem(AUTH_KEY); showAuthenticatedView(); });
+  $("logout").addEventListener("click", async () => { await api("/logout", { method: "POST", body: "{}" }).catch(() => {}); showAuthenticatedView(false); });
   $("lead-form").addEventListener("submit", handleSave);
   $("lead-form").addEventListener("input", clearDuplicateWarning);
   $("save-anyway").addEventListener("click", () => pendingDuplicateSave && persistLead(pendingDuplicateSave));
@@ -256,8 +237,9 @@ function bindEvents() {
   ["search", "filter-status", "filter-referral", "filter-priority", "filter-lead-type", "filter-followup", "sort-by"].forEach((id) => $(id).addEventListener("input", render));
   $("clear-filters").addEventListener("click", clearFilters);
   document.querySelector(".dashboard").addEventListener("click", handleMetricFilter);
-  $("export-all").addEventListener("click", () => exportCsv(leads, "restore-at-home-all-leads.csv"));
+  $("export-all").addEventListener("click", () => exportServerCsv());
   $("export-filtered").addEventListener("click", () => exportCsv(filteredLeads, "restore-at-home-filtered-leads.csv"));
+  $("import-browser").addEventListener("click", importBrowserRecords);
   $("lead-list").addEventListener("click", handleLeadListClick);
   $("contact-form").addEventListener("submit", handleContactSave);
   $("contact-dialog").addEventListener("keydown", trapDialogFocus);
@@ -266,17 +248,16 @@ function bindEvents() {
   document.addEventListener("click", closeOpenMenus);
   document.addEventListener("keydown", handleGlobalKeydown);
 }
-function handleLogin(event) {
+async function handleLogin(event) {
   event.preventDefault();
-  if ($("password").value === DEMO_PASSWORD) { sessionStorage.setItem(AUTH_KEY, "true"); $("password").value = ""; showAuthenticatedView(); }
-  else $("login-error").textContent = "Incorrect password.";
+  try { await api("/login", { method: "POST", body: JSON.stringify({ password: $("password").value }) }); $("password").value = ""; showAuthenticatedView(true); await refreshLeads(); } catch { $("login-error").textContent = "Sign-in failed."; }
 }
-function showAuthenticatedView() {
-  const authed = sessionStorage.getItem(AUTH_KEY) === "true";
+function showAuthenticatedView(authed) {
   $("login-view").classList.toggle("hidden", authed);
   $("app-view").classList.toggle("hidden", !authed);
   if (authed) {
     render();
+    $("import-browser").classList.toggle("hidden", !localStorage.getItem(STORAGE_KEY));
     if (storageRecoveryError) announce(storageRecoveryError);
   }
 }
@@ -310,36 +291,15 @@ function handleSave(event) {
   }
   persistLead({ fields, existingId: currentId });
 }
-function persistLead({ fields, existingId }) {
+async function persistLead({ fields, existingId }) {
   if (saveInProgress) return;
   saveInProgress = true;
   $("save-lead").disabled = true;
   $("save-anyway").disabled = true;
   try {
     const existing = leads.find((lead) => lead.id === existingId);
-    let nextLeads;
-    if (existing) {
-      const now = new Date().toISOString();
-      const activities = [...existing.activities];
-      if (existing.status !== fields.status) {
-        const specializedType = ({ [STATUSES.BOOKED]: ACTIVITY_TYPES.BOOKED, [STATUSES.COMPLETED]: ACTIVITY_TYPES.COMPLETED, [STATUSES.LOST]: ACTIVITY_TYPES.LOST })[fields.status];
-        activities.push(createActivity(existing.id, specializedType || ACTIVITY_TYPES.STATUS_CHANGED, now, "", `${existing.status} → ${fields.status}`));
-      }
-      if (existing.nextFollowUp !== fields.nextFollowUp) activities.push(createActivity(existing.id, ACTIVITY_TYPES.FOLLOW_UP_CHANGED, now, "", describeFollowUpChange(existing.nextFollowUp, fields.nextFollowUp)));
-      if (existing.lastContactedAt !== fields.lastContactedAt || existing.lastContactMethod !== fields.lastContactMethod) {
-        activities.push(createActivity(existing.id, ACTIVITY_TYPES.CONTACTED, fields.lastContactedAt ? new Date(fields.lastContactedAt).toISOString() : now, fields.lastContactMethod, "Contact details updated"));
-      }
-      const updated = { ...existing, ...fields, activities };
-      if (fields.status === STATUSES.BOOKED && !updated.bookedAt) updated.bookedAt = now;
-      nextLeads = leads.map((lead) => lead.id === existing.id ? updated : lead);
-    } else {
-      const now = new Date().toISOString();
-      const id = crypto.randomUUID();
-      const lead = normalizeLead({ id, createdAt: now, ...fields, bookedAt: fields.status === STATUSES.BOOKED ? now : "", activities: [createActivity(id, ACTIVITY_TYPES.LEAD_CREATED, now)] });
-      nextLeads = [lead, ...leads];
-    }
-    if (!saveLeads(nextLeads)) throw new Error("Storage write failed");
-    leads = nextLeads;
+    await api(existing ? `/leads/${existing.id}` : "/leads", { method: existing ? "PUT" : "POST", body: JSON.stringify(fields) });
+    await refreshLeads();
     resetForm();
     render();
     announce(`${fields.name} ${existing ? "updated" : "created"} successfully.`);
@@ -386,16 +346,9 @@ function editLead(id) {
   scrollTo({ top: 0, behavior: "smooth" });
 }
 function toDateTimeLocal(value) { if (!value) return ""; const date = new Date(value); const offset = date.getTimezoneOffset() * 60000; return Number.isNaN(date.getTime()) ? "" : new Date(date - offset).toISOString().slice(0, 16); }
-function deleteLead(id) {
+async function deleteLead(id) {
   if (!confirm("Delete this lead?")) return;
-  const nextLeads = leads.filter((lead) => lead.id !== id);
-  if (!saveLeads(nextLeads)) {
-    announce("The lead could not be deleted because the change was not saved. Try again.");
-    return;
-  }
-  leads = nextLeads;
-  render();
-  announce("Lead deleted successfully.");
+  try { await api(`/leads/${id}`, { method: "DELETE" }); await refreshLeads(); announce("Lead deleted successfully."); } catch { announce("The lead could not be deleted. Try again."); }
 }
 function handleLeadListClick(event) {
   const action = event.target.closest("[data-action]");
@@ -468,7 +421,7 @@ function trapDialogFocus(event) {
   if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
   else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
 }
-function handleContactSave(event) {
+async function handleContactSave(event) {
   event.preventDefault();
   const id = $("contact-lead-id").value;
   const method = $("contact-method").value;
@@ -482,13 +435,7 @@ function handleContactSave(event) {
   const existing = leads.find((lead) => lead.id === id);
   if (!existing) { $("contact-error").textContent = "This lead is no longer available."; return; }
   const contactedAt = contactedDate.toISOString();
-  const updated = { ...existing, lastContactedAt: contactedAt, lastContactMethod: method, activities: [...existing.activities, createActivity(id, ACTIVITY_TYPES.CONTACTED, contactedAt, method, note)] };
-  const nextLeads = leads.map((lead) => lead.id === id ? updated : lead);
-  if (!saveLeads(nextLeads)) {
-    $("contact-error").textContent = "Contact activity could not be saved. Try again.";
-    return;
-  }
-  leads = nextLeads;
+  try { await api(`/leads/${id}/activity`, { method: "POST", body: JSON.stringify({ activityAt: contactedAt, contactMethod: method, note }) }); await refreshLeads(); } catch { $("contact-error").textContent = "Contact activity could not be saved. Try again."; return; }
   closeContactDialog();
   render();
   announce(`${existing.name} marked contacted.`);
@@ -599,6 +546,20 @@ function exportCsv(rows, filename) {
   const url = URL.createObjectURL(blob);
   const link = Object.assign(document.createElement("a"), { href: url, download: filename });
   link.click(); URL.revokeObjectURL(url);
+}
+async function exportServerCsv() { const response=await fetch("/api/export",{credentials:"same-origin"}); if(response.status===401){showAuthenticatedView(false);return;} if(!response.ok){announce("Export failed.");return;} const blob=await response.blob(),url=URL.createObjectURL(blob),link=Object.assign(document.createElement("a"),{href:url,download:"restore-at-home-all-leads.csv"});link.click();URL.revokeObjectURL(url); }
+async function importBrowserRecords() {
+  const records = loadLegacyLeads();
+  if (storageRecoveryError) { announce(storageRecoveryError); return; }
+  try {
+    const preview = await api("/import/preview", { method: "POST", body: JSON.stringify({ leads: records }) });
+    if (!confirm(`Browser backup preview: ${preview.total} records (${preview.valid} valid, ${preview.invalid} invalid). Import valid data only if every record is valid? A JSON backup will download first; browser data will remain unchanged.`)) return;
+    if (preview.invalid) { announce("Import cancelled. Correct invalid browser records first."); return; }
+    const backup = new Blob([JSON.stringify(records, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(backup); Object.assign(document.createElement("a"), { href: url, download: `restore-at-home-browser-backup-${formatLocalCalendarDate()}.json` }).click(); URL.revokeObjectURL(url);
+    const result = await api("/import", { method: "POST", body: JSON.stringify({ leads: records }) });
+    await refreshLeads(); announce(`${result.imported} browser records imported. The original browser backup was preserved.`);
+  } catch (error) { announce(error.message || "Import failed; browser data was not changed."); }
 }
 if (typeof document !== "undefined") init();
 if (typeof module !== "undefined" && module.exports) module.exports = { normalizeStatus, serializeLeadsToCsv };
