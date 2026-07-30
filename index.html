@@ -73,8 +73,12 @@
               <label>Status *<select id="status" required></select></label>
               <label>Lead priority *<select id="priority" required></select></label>
               <label>Next follow-up date<input id="nextFollowUp" type="date" /></label>
+              <label class="full-width">Next action<input id="nextAction" placeholder="Call to confirm availability" /></label>
+              <label>Last contacted<input id="lastContactedAt" type="datetime-local" /></label>
+              <label>Last contact method<select id="lastContactMethod"><option value="">Not recorded</option></select></label>
               <label class="full-width">Notes<textarea id="notes" rows="4" placeholder="Best time to call, admin reminders, etc."></textarea></label>
             </div>
+            <div id="edit-history" class="hidden"></div>
             <p id="form-error" class="error" role="alert"></p>
             <button type="submit" id="save-lead">Save lead</button>
           </form>
@@ -87,7 +91,7 @@
               </div>
             </div>
             <div class="filters">
-              <input id="search" type="search" placeholder="Search name, phone, email, location, condition, notes" />
+              <input id="search" type="search" placeholder="Search name, phone, email, location, condition, next action, notes" />
               <select id="filter-status"><option value="">All statuses</option></select>
               <select id="filter-referral"><option value="">All referral sources</option></select>
               <select id="filter-priority"><option value="">All priorities</option></select>
