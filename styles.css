@@ -62,11 +62,12 @@ input:focus, select:focus, textarea:focus { outline: 3px solid rgba(23,79,71,.16
 .priority-high { background: var(--peach); color: #9f211b; }
 .priority-medium { background: var(--cream); color: #9a3b09; }
 .priority-low { background: var(--sky); color: #24527a; }
-.status-new, .type-new-patient { background: var(--accent); color: var(--primary-dark); }
+.status-new-inquiry, .type-new-patient { background: var(--accent); color: var(--primary-dark); }
 .status-contacted { background: var(--sky); color: #24527a; }
 .status-booked { background: #dff7df; color: #176239; }
-.status-follow-up-needed, .followup-badge { background: var(--accent); color: var(--primary-dark); }
-.status-not-a-fit, .status-lost { background: #eceff1; color: #4f5b62; }
+.status-waiting-for-reply, .followup-badge { background: var(--accent); color: var(--primary-dark); }
+.status-completed { background: #e4f3ef; color: var(--primary-dark); }
+.status-lost { background: #eceff1; color: #4f5b62; }
 .type-returning-patient { background: #eee7ff; color: #5940a8; }
 .referral-badge { background: var(--accent); color: var(--primary-dark); }
 .card-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .35rem .8rem; color: var(--muted); overflow-wrap: anywhere; }
