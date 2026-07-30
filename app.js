@@ -35,6 +35,7 @@ const demoLeads = [
 ];
 let leads = loadLeads();
 let filteredLeads = [];
+let contactDialogTrigger = null;
 const $ = (id) => document.getElementById(id);
 
 function normalizeStatus(value) {
@@ -125,6 +126,7 @@ function init() {
   priorities.forEach((priority) => [$("priority"), $("filter-priority")].forEach((el) => el.add(new Option(priority, priority))));
   leadTypes.forEach((type) => [$("leadType"), $("filter-lead-type")].forEach((el) => el.add(new Option(type, type))));
   CONTACT_METHODS.forEach((method) => $("lastContactMethod").add(new Option(method, method)));
+  CONTACT_METHODS.forEach((method) => $("contact-method").add(new Option(method, method)));
   bindEvents();
   showAuthenticatedView();
 }
@@ -137,6 +139,13 @@ function bindEvents() {
   $("clear-filters").addEventListener("click", clearFilters);
   $("export-all").addEventListener("click", () => exportCsv(leads, "restore-at-home-all-leads.csv"));
   $("export-filtered").addEventListener("click", () => exportCsv(filteredLeads, "restore-at-home-filtered-leads.csv"));
+  $("lead-list").addEventListener("click", handleLeadListClick);
+  $("contact-form").addEventListener("submit", handleContactSave);
+  $("contact-dialog").addEventListener("keydown", trapDialogFocus);
+  $("contact-dialog").addEventListener("close", restoreContactDialogFocus);
+  document.querySelectorAll("[data-dialog-close]").forEach((button) => button.addEventListener("click", closeContactDialog));
+  document.addEventListener("click", closeOpenMenus);
+  document.addEventListener("keydown", handleGlobalKeydown);
 }
 function handleLogin(event) {
   event.preventDefault();
@@ -201,6 +210,109 @@ function editLead(id) {
 }
 function toDateTimeLocal(value) { if (!value) return ""; const date = new Date(value); const offset = date.getTimezoneOffset() * 60000; return Number.isNaN(date.getTime()) ? "" : new Date(date - offset).toISOString().slice(0, 16); }
 function deleteLead(id) { if (confirm("Delete this lead?")) { leads = leads.filter((l) => l.id !== id); saveLeads(); render(); } }
+function handleLeadListClick(event) {
+  const action = event.target.closest("[data-action]");
+  if (!action || !$("lead-list").contains(action)) return;
+  const card = action.closest("[data-lead-id]");
+  const id = card?.dataset.leadId;
+  if (!id) return;
+  const handlers = {
+    edit: () => editLead(id),
+    delete: () => deleteLead(id),
+    contact: () => openContactDialog(id, action),
+    disclose: () => toggleCardDetails(card, action),
+    more: () => toggleMoreMenu(card, action)
+  };
+  handlers[action.dataset.action]?.();
+}
+function toggleCardDetails(card, button) {
+  const details = card.querySelector(".lead-card-details");
+  const expanded = button.getAttribute("aria-expanded") === "true";
+  button.setAttribute("aria-expanded", String(!expanded));
+  card.classList.toggle("is-expanded", !expanded);
+  button.textContent = expanded ? "Show details" : "Hide details";
+}
+function toggleMoreMenu(card, button) {
+  const menu = card.querySelector(".more-menu");
+  const opening = menu.hidden;
+  closeOpenMenus();
+  menu.hidden = !opening;
+  button.setAttribute("aria-expanded", String(opening));
+  if (opening) menu.querySelector("button")?.focus();
+}
+function closeOpenMenus(event) {
+  if (event?.target.closest(".more-actions")) return;
+  document.querySelectorAll(".more-menu:not([hidden])").forEach((menu) => {
+    menu.hidden = true;
+    menu.previousElementSibling?.setAttribute("aria-expanded", "false");
+  });
+}
+function handleGlobalKeydown(event) {
+  if (event.key !== "Escape" || $("contact-dialog").open) return;
+  const menu = document.querySelector(".more-menu:not([hidden])");
+  if (!menu) return;
+  const trigger = menu.previousElementSibling;
+  closeOpenMenus();
+  trigger?.focus();
+}
+function openContactDialog(id, trigger) {
+  const lead = leads.find((item) => item.id === id);
+  if (!lead) return;
+  contactDialogTrigger = trigger;
+  $("contact-form").reset();
+  $("contact-lead-id").value = id;
+  $("contact-lead-name").textContent = lead.name;
+  $("contact-date").value = toDateTimeLocal(new Date().toISOString());
+  $("contact-error").textContent = "";
+  $("contact-dialog").showModal();
+  $("contact-method").focus();
+}
+function closeContactDialog() { $("contact-dialog").close(); }
+function restoreContactDialogFocus() {
+  if (contactDialogTrigger?.isConnected) contactDialogTrigger.focus();
+  contactDialogTrigger = null;
+}
+function trapDialogFocus(event) {
+  if (event.key === "Escape") { event.preventDefault(); closeContactDialog(); return; }
+  if (event.key !== "Tab") return;
+  const focusable = [...event.currentTarget.querySelectorAll('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [href]')].filter((element) => !element.hidden);
+  const first = focusable[0];
+  const last = focusable.at(-1);
+  if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+  else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+}
+function handleContactSave(event) {
+  event.preventDefault();
+  const id = $("contact-lead-id").value;
+  const method = $("contact-method").value;
+  const localDate = $("contact-date").value;
+  const note = $("contact-note").value.trim();
+  const contactedDate = new Date(localDate);
+  if (!CONTACT_METHODS.includes(method) || !localDate || Number.isNaN(contactedDate.getTime())) {
+    $("contact-error").textContent = "Choose a contact method and valid date and time.";
+    return;
+  }
+  const existing = leads.find((lead) => lead.id === id);
+  if (!existing) { $("contact-error").textContent = "This lead is no longer available."; return; }
+  const contactedAt = contactedDate.toISOString();
+  const updated = { ...existing, lastContactedAt: contactedAt, lastContactMethod: method, activities: [...existing.activities, createActivity(id, ACTIVITY_TYPES.CONTACTED, contactedAt, method, note)] };
+  const nextLeads = leads.map((lead) => lead.id === id ? updated : lead);
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(nextLeads));
+    leads = nextLeads;
+  } catch (error) {
+    console.error("Unable to save contact activity.", error);
+    $("contact-error").textContent = "Contact activity could not be saved. Try again.";
+    return;
+  }
+  closeContactDialog();
+  render();
+  announce(`${existing.name} marked contacted.`);
+}
+function announce(message) {
+  $("app-feedback").textContent = "";
+  requestAnimationFrame(() => { $("app-feedback").textContent = message; });
+}
 function getFilteredLeads() {
   const q = $("search").value.toLowerCase();
   const fields = ["name", "phone", "email", "location", "condition", "notes", "nextAction"];
@@ -256,7 +368,17 @@ function renderDailyActions() {
 function renderLeads() {
   $("result-count").textContent = filteredLeads.length;
   $("empty-state").classList.toggle("hidden", filteredLeads.length > 0);
-  $("lead-list").innerHTML = filteredLeads.map((lead) => { const status = normalizeStatus(lead.status); const followUp = classifyFollowUp(lead.nextFollowUp); return `<article class="lead-card"><header><div><h3>${escapeHtml(lead.name)}</h3><p class="muted">${escapeHtml(lead.condition)}</p></div><span class="badge priority-pill priority-${lead.priority.toLowerCase()}">${lead.priority}</span></header><div class="badges"><span class="badge status-${status.toLowerCase().replace(/[^a-z0-9]+/g, "-")}">${escapeHtml(status)}</span><span class="badge type-${(lead.leadType || "New patient").toLowerCase().replace(/[^a-z0-9]+/g, "-")}">${escapeHtml(lead.leadType || "New patient")}</span>${lead.referralSource ? `<span class="badge referral-badge">${escapeHtml(lead.referralSource)}</span>` : ""}${followUpChip(followUp)}${followUp.exactDate ? `<span class="exact-date">${escapeHtml(followUp.exactDate)}</span>` : ""}</div><div class="card-grid"><span>☎ ${escapeHtml(lead.phone)}</span><span>✉ ${escapeHtml(lead.email || "No email")}</span><span>📍 ${escapeHtml(lead.location)}</span><span>Created ${formatDateTime(lead.createdAt)}</span><span><strong>Next action:</strong> ${escapeHtml(lead.nextAction || "None set")}</span><span><strong>Last contact:</strong> ${lead.lastContactedAt ? `${formatDateTime(lead.lastContactedAt)}${lead.lastContactMethod ? ` · ${escapeHtml(lead.lastContactMethod)}` : ""}` : "Not recorded"}</span></div>${lead.notes ? `<p>${escapeHtml(lead.notes)}</p>` : ""}<details class="lead-details"><summary>Activity details</summary>${activityHistoryMarkup(lead)}</details><div class="card-actions"><button class="secondary" onclick="editLead('${lead.id}')">Edit</button><button class="ghost" onclick="deleteLead('${lead.id}')">Delete</button></div></article>`; }).join("");
+  $("lead-list").innerHTML = filteredLeads.map(leadCardMarkup).join("");
+}
+function leadCardMarkup(lead) {
+  const status = normalizeStatus(lead.status);
+  const followUp = classifyFollowUp(lead.nextFollowUp);
+  const slug = (value) => value.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+  const id = escapeHtml(lead.id);
+  const phoneUrl = lead.phone && isValidPhone(lead.phone) ? `tel:${encodeURIComponent(normalizePhone(lead.phone))}` : "";
+  const emailUrl = lead.email && isValidEmail(lead.email) ? `mailto:${encodeURIComponent(lead.email)}` : "";
+  const contactLink = (url, label, value) => url ? `<a class="quick-link" href="${url}" aria-label="${label} ${escapeHtml(lead.name)}"><span aria-hidden="true">${label === "Call" ? "☎" : "✉"}</span><span>${label}</span><small>${escapeHtml(value)}</small></a>` : `<span class="contact-unavailable" aria-label="${label} unavailable">${label} unavailable</span>`;
+  return `<article class="lead-card" data-lead-id="${id}"><div class="mobile-summary"><div><h3>${escapeHtml(lead.name)}</h3><div class="summary-chips"><span class="badge priority-pill priority-${lead.priority.toLowerCase()}">${escapeHtml(lead.priority)}</span><span class="badge status-${slug(status)}">${escapeHtml(status)}</span>${followUpChip(followUp)}</div></div><button type="button" class="disclosure-button ghost" data-action="disclose" aria-expanded="false" aria-controls="lead-details-${id}">Show details</button></div><div id="lead-details-${id}" class="lead-card-details"><header><div><h3>${escapeHtml(lead.name)}</h3><p class="condition">${escapeHtml(lead.condition)}</p></div><span class="badge priority-pill priority-${lead.priority.toLowerCase()}">${escapeHtml(lead.priority)}</span></header><div class="badges"><span class="badge status-${slug(status)}">${escapeHtml(status)}</span><span class="badge type-${slug(lead.leadType || "New patient")}">${escapeHtml(lead.leadType || "New patient")}</span>${lead.referralSource ? `<span class="badge referral-badge">${escapeHtml(lead.referralSource)}</span>` : ""}${followUpChip(followUp)}${followUp.exactDate ? `<span class="exact-date">${escapeHtml(followUp.exactDate)}</span>` : ""}</div><div class="contact-actions">${contactLink(phoneUrl, "Call", lead.phone)}${contactLink(emailUrl, "Email", lead.email)}</div><dl class="card-grid"><div><dt>Location</dt><dd>${escapeHtml(lead.location)}</dd></div><div><dt>Created</dt><dd>${formatDateTime(lead.createdAt)}</dd></div><div><dt>Last contact</dt><dd>${lead.lastContactedAt ? `${formatDateTime(lead.lastContactedAt)}${lead.lastContactMethod ? ` · ${escapeHtml(lead.lastContactMethod)}` : ""}` : "Not recorded"}</dd></div><div><dt>Next action</dt><dd>${escapeHtml(lead.nextAction || "None set")}</dd></div></dl>${lead.notes ? `<p class="lead-notes"><strong>Notes:</strong> ${escapeHtml(lead.notes)}</p>` : ""}${activityHistoryMarkup(lead)}<div class="card-actions"><button type="button" data-action="contact">Mark contacted</button><button type="button" class="secondary" data-action="edit">Edit</button><div class="more-actions"><button type="button" class="ghost" data-action="more" aria-expanded="false" aria-haspopup="menu">More <span aria-hidden="true">▾</span></button><div class="more-menu" role="menu" hidden><button type="button" class="danger-action" role="menuitem" data-action="delete">Delete lead</button></div></div></div></div></article>`;
 }
 function formatDateTime(value) { const date = new Date(value); return Number.isNaN(date.getTime()) ? "Unknown" : escapeHtml(date.toLocaleString()); }
 function activityHistoryMarkup(lead) {

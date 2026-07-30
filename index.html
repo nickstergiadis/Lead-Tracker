@@ -111,6 +111,32 @@
         </section>
       </section>
     </main>
+
+    <dialog id="contact-dialog" class="contact-dialog" aria-labelledby="contact-dialog-title">
+      <form id="contact-form" method="dialog" novalidate>
+        <div class="dialog-heading">
+          <div>
+            <p class="eyebrow">Log activity</p>
+            <h2 id="contact-dialog-title">Mark lead contacted</h2>
+          </div>
+          <button type="button" class="icon-button ghost" data-dialog-close aria-label="Close mark contacted dialog">×</button>
+        </div>
+        <p id="contact-lead-name" class="muted"></p>
+        <input id="contact-lead-id" type="hidden" />
+        <label for="contact-method">Contact method *</label>
+        <select id="contact-method" required></select>
+        <label for="contact-date">Date and time *</label>
+        <input id="contact-date" type="datetime-local" required />
+        <label for="contact-note">Short note <span class="muted">(optional)</span></label>
+        <textarea id="contact-note" rows="3" maxlength="160" placeholder="Outcome or next step"></textarea>
+        <p id="contact-error" class="error" role="alert"></p>
+        <div class="dialog-actions">
+          <button type="button" class="ghost" data-dialog-close>Cancel</button>
+          <button type="submit">Save contact</button>
+        </div>
+      </form>
+    </dialog>
+    <div id="app-feedback" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>
     <script src="app.js"></script>
   </body>
 </html>
