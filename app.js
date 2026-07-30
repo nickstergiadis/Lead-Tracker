@@ -41,6 +41,8 @@ let leads = loadLeads();
 let filteredLeads = [];
 let contactDialogTrigger = null;
 let activeMetricFilter = "";
+let saveInProgress = false;
+let pendingDuplicateSave = null;
 const $ = (id) => document.getElementById(id);
 
 function normalizeStatus(value) {
@@ -171,8 +173,22 @@ function calculateMetrics(records, now = new Date()) {
   };
 }
 function escapeHtml(value = "") { return String(value).replace(/[&<>'"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" }[c])); }
-function normalizePhone(phone) { return phone.replace(/[\s().-]/g, ""); }
-function isValidPhone(phone) { return /^\+?\d{7,15}$/.test(normalizePhone(phone)); }
+function normalizePhoneForMatch(phone) { return String(phone || "").replace(/\D/g, ""); }
+function normalizeEmailForMatch(email) { return String(email || "").trim().toLocaleLowerCase(); }
+function phonesMatch(first, second) {
+  const a = normalizePhoneForMatch(first);
+  const b = normalizePhoneForMatch(second);
+  if (!a || !b) return false;
+  if (a === b) return true;
+  // Only compare a national significant number when the country code is explicit and
+  // unambiguous: +1 plus ten NANP digits versus those same ten digits. We deliberately
+  // do not strip arbitrary country codes because the stored records have no country metadata.
+  const explicitNanp = (value, digits) => String(value || "").trim().startsWith("+1") && digits.length === 11;
+  return explicitNanp(first, a) && b.length === 10 && a.slice(1) === b
+    || explicitNanp(second, b) && a.length === 10 && b.slice(1) === a;
+}
+function normalizePhone(phone) { return normalizePhoneForMatch(phone); }
+function isValidPhone(phone) { return /^\d{7,15}$/.test(normalizePhoneForMatch(phone)); }
 function isValidEmail(email) { return !email || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email); }
 
 function init() {
@@ -188,6 +204,9 @@ function bindEvents() {
   $("login-form").addEventListener("submit", handleLogin);
   $("logout").addEventListener("click", () => { sessionStorage.removeItem(AUTH_KEY); showAuthenticatedView(); });
   $("lead-form").addEventListener("submit", handleSave);
+  $("lead-form").addEventListener("input", clearDuplicateWarning);
+  $("save-anyway").addEventListener("click", () => pendingDuplicateSave && persistLead(pendingDuplicateSave));
+  $("review-duplicate").addEventListener("click", reviewDuplicate);
   $("cancel-edit").addEventListener("click", resetForm);
   ["search", "filter-status", "filter-referral", "filter-priority", "filter-lead-type", "filter-followup", "sort-by"].forEach((id) => $(id).addEventListener("input", render));
   $("clear-filters").addEventListener("click", clearFilters);
@@ -217,17 +236,40 @@ function getFormData() {
   return { name: $("name").value.trim(), phone: $("phone").value.trim(), email: $("email").value.trim(), location: $("location").value.trim(), referralSource: $("referralSource").value.trim(), condition: $("condition").value.trim(), status: $("status").value, priority: $("priority").value, leadType: $("leadType").value, nextFollowUp: $("nextFollowUp").value, nextAction: $("nextAction").value.trim(), lastContactedAt: $("lastContactedAt").value, lastContactMethod: $("lastContactMethod").value, notes: $("notes").value.trim() };
 }
 function validateLead(lead) {
-  if (!lead.name || !lead.phone || !lead.location || !lead.condition || !lead.status || !lead.priority || !lead.leadType) return "Please complete all required fields.";
-  if (!isValidPhone(lead.phone)) return "Enter a valid phone number with 7 to 15 digits.";
-  if (!isValidEmail(lead.email)) return "Enter a valid email address or leave email blank.";
-  return "";
+  const errors = {};
+  [["name", "Enter a name."], ["phone", "Enter a phone number."], ["location", "Enter a location."], ["condition", "Enter a condition or reason."], ["status", "Choose a status."], ["priority", "Choose a priority."], ["leadType", "Choose a lead type."]].forEach(([field, message]) => { if (!lead[field]) errors[field] = message; });
+  if (lead.phone && !isValidPhone(lead.phone)) errors.phone = "Enter a valid phone number with 7 to 15 digits.";
+  if (!isValidEmail(lead.email)) errors.email = "Enter a valid email address or leave email blank.";
+  return errors;
 }
 function handleSave(event) {
   event.preventDefault();
+  if (saveInProgress) return;
   const fields = getFormData();
-  const error = validateLead(fields);
-  if (error) { $("form-error").textContent = error; return; }
-  const existing = leads.find((lead) => lead.id === $("lead-id").value);
+  const errors = validateLead(fields);
+  showValidationErrors(errors);
+  if (Object.keys(errors).length) { announce("Lead could not be saved. Check the highlighted fields."); return; }
+  const currentId = $("lead-id").value;
+  const duplicate = leads.find((lead) => lead.id !== currentId && ((fields.phone && phonesMatch(fields.phone, lead.phone)) || (normalizeEmailForMatch(fields.email) && normalizeEmailForMatch(fields.email) === normalizeEmailForMatch(lead.email))));
+  if (duplicate) {
+    pendingDuplicateSave = { fields, existingId: currentId };
+    $("duplicate-message").textContent = `${duplicate.name} has a matching ${phonesMatch(fields.phone, duplicate.phone) ? "phone number" : "email address"}.`;
+    $("duplicate-warning").dataset.leadId = duplicate.id;
+    $("duplicate-warning").classList.remove("hidden");
+    $("review-duplicate").focus();
+    announce(`Possible duplicate found for ${duplicate.name}. Review it or choose Save anyway.`);
+    return;
+  }
+  persistLead({ fields, existingId: currentId });
+}
+function persistLead({ fields, existingId }) {
+  if (saveInProgress) return;
+  saveInProgress = true;
+  $("save-lead").disabled = true;
+  $("save-anyway").disabled = true;
+  const previousLeads = leads;
+  try {
+    const existing = leads.find((lead) => lead.id === existingId);
   if (existing) {
     const now = new Date().toISOString();
     const activities = [...existing.activities];
@@ -248,13 +290,45 @@ function handleSave(event) {
     const lead = normalizeLead({ id, createdAt: now, ...fields, bookedAt: fields.status === STATUSES.BOOKED ? now : "", activities: [createActivity(id, ACTIVITY_TYPES.LEAD_CREATED, now)] });
     leads = [lead, ...leads];
   }
-  saveLeads(); resetForm(); render();
+    saveLeads();
+    resetForm();
+    render();
+    announce(`${fields.name} ${existing ? "updated" : "created"} successfully.`);
+  } catch (error) {
+    leads = previousLeads;
+    console.error("Unable to save lead.", error);
+    $("form-error").textContent = "The lead could not be saved. Your entries have been preserved; try again.";
+    announce("Lead could not be saved. Your entries have been preserved.");
+  } finally {
+    saveInProgress = false;
+    $("save-lead").disabled = false;
+    $("save-anyway").disabled = false;
+  }
 }
 function createActivity(leadId, type, activityAt = new Date().toISOString(), contactMethod = "", note = "") {
   return { id: crypto.randomUUID(), leadId, type, activityAt, contactMethod: CONTACT_METHODS.includes(contactMethod) ? contactMethod : "", note, createdAt: new Date().toISOString() };
 }
 function describeFollowUpChange(previous, next) { return `${previous || "No date"} → ${next || "No date"}`; }
-function resetForm() { $("lead-form").reset(); $("lead-id").value = ""; $("form-title").textContent = "Add lead"; $("save-lead").textContent = "Save lead"; $("cancel-edit").classList.add("hidden"); $("edit-history").classList.add("hidden"); $("form-error").textContent = ""; }
+function showValidationErrors(errors = {}) {
+  ["name", "phone", "email", "location", "condition", "status", "priority", "leadType"].forEach((field) => {
+    $(`${field}-error`).textContent = errors[field] || "";
+    $(field).setAttribute("aria-invalid", String(Boolean(errors[field])));
+  });
+  $("form-error").textContent = Object.keys(errors).length ? "Please correct the highlighted fields." : "";
+  const firstInvalid = Object.keys(errors)[0];
+  if (firstInvalid) $(firstInvalid).focus();
+}
+function clearDuplicateWarning() { pendingDuplicateSave = null; $("duplicate-warning").classList.add("hidden"); }
+function reviewDuplicate() {
+  const id = $("duplicate-warning").dataset.leadId;
+  const lead = leads.find((item) => item.id === id);
+  if (!lead) return;
+  $("search").value = lead.name;
+  render();
+  document.querySelector(`[data-lead-id="${CSS.escape(id)}"]`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+  announce(`${lead.name} is shown in the leads list. Your form entries are unchanged.`);
+}
+function resetForm() { $("lead-form").reset(); $("lead-id").value = ""; $("form-title").textContent = "Add lead"; $("save-lead").textContent = "Save lead"; $("cancel-edit").classList.add("hidden"); $("edit-history").classList.add("hidden"); showValidationErrors(); clearDuplicateWarning(); }
 function editLead(id) {
   const lead = leads.find((l) => l.id === id);
   Object.entries(lead).forEach(([key, value]) => { if ($(key) && !["lastContactedAt"].includes(key)) $(key).value = value; });
