@@ -58,7 +58,34 @@ function loadLeads() {
   }
 }
 function saveLeads() { localStorage.setItem(STORAGE_KEY, JSON.stringify(leads)); }
-function todayISO() { return new Date().toISOString().slice(0, 10); }
+function localDateParts(date = new Date()) {
+  return { year: date.getFullYear(), month: date.getMonth() + 1, day: date.getDate() };
+}
+function formatLocalCalendarDate(date = new Date()) {
+  const { year, month, day } = localDateParts(date);
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+function parseCalendarDate(value) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value || "");
+  if (!match) return null;
+  const [, year, month, day] = match.map(Number);
+  const date = new Date(year, month - 1, day);
+  if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) return null;
+  return { year, month, day, date };
+}
+function calendarDayNumber({ year, month, day }) { return Math.floor(Date.UTC(year, month - 1, day) / 86400000); }
+function classifyFollowUp(value, now = new Date()) {
+  const followUp = parseCalendarDate(value);
+  if (!followUp) return { state: "none", dayDifference: null, relativeLabel: "No follow-up date", exactDate: "" };
+  const dayDifference = calendarDayNumber(followUp) - calendarDayNumber(localDateParts(now));
+  const state = dayDifference < 0 ? "overdue" : dayDifference === 0 ? "today" : "future";
+  const relativeLabel = dayDifference < -1 ? `${Math.abs(dayDifference)} days overdue`
+    : dayDifference === -1 ? "1 day overdue"
+      : dayDifference === 0 ? "Follow up today"
+        : dayDifference === 1 ? "Tomorrow" : `In ${dayDifference} days`;
+  const exactDate = followUp.date.toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" });
+  return { state, dayDifference, relativeLabel, exactDate };
+}
 function escapeHtml(value = "") { return String(value).replace(/[&<>'"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" }[c])); }
 function normalizePhone(phone) { return phone.replace(/[\s().-]/g, ""); }
 function isValidPhone(phone) { return /^\+?\d{7,15}$/.test(normalizePhone(phone)); }
@@ -130,7 +157,7 @@ function sortLeads(a, b) {
   if (sort === "priority") return priorities.indexOf(b.priority) - priorities.indexOf(a.priority);
   return new Date(b.createdAt) - new Date(a.createdAt);
 }
-function render() { updateReferralFilters(); filteredLeads = getFilteredLeads(); renderDashboard(); renderLeads(); }
+function render() { updateReferralFilters(); filteredLeads = getFilteredLeads(); renderDashboard(); renderDailyActions(); renderLeads(); }
 function updateReferralFilters() {
   const current = $("filter-referral").value;
   $("filter-referral").innerHTML = '<option value="">All referral sources</option>';
@@ -139,17 +166,35 @@ function updateReferralFilters() {
   $("filter-referral").value = current;
 }
 function renderDashboard() {
-  const today = todayISO();
   $("total-leads").textContent = leads.length;
   $("booked-leads").textContent = leads.filter((l) => normalizeStatus(l.status) === STATUSES.BOOKED).length;
   $("followup-leads").textContent = leads.filter((l) => normalizeStatus(l.status) === STATUSES.WAITING_FOR_REPLY).length;
-  $("overdue-leads").textContent = leads.filter((l) => l.nextFollowUp && l.nextFollowUp < today && !isClosedStatus(l.status)).length;
-  $("upcoming-leads").textContent = leads.filter((l) => l.nextFollowUp && l.nextFollowUp >= today).length;
+  $("overdue-leads").textContent = leads.filter((l) => classifyFollowUp(l.nextFollowUp).state === "overdue" && !isClosedStatus(l.status)).length;
+  $("upcoming-leads").textContent = leads.filter((l) => ["today", "future"].includes(classifyFollowUp(l.nextFollowUp).state)).length;
+}
+function followUpChip(followUp) {
+  const exactDate = followUp.exactDate ? ` — ${followUp.exactDate}` : "";
+  return `<span class="badge followup-badge followup-${followUp.state}" title="${escapeHtml(followUp.relativeLabel + exactDate)}" aria-label="${escapeHtml(followUp.relativeLabel + exactDate)}">${escapeHtml(followUp.relativeLabel)}</span>`;
+}
+function renderDailyActions() {
+  const priorityRank = { High: 0, Medium: 1, Low: 2 };
+  const actionLeads = leads.filter((lead) => {
+    const state = classifyFollowUp(lead.nextFollowUp).state;
+    return !isClosedStatus(lead.status) && (state === "overdue" || state === "today");
+  }).sort((a, b) => {
+    const dayOrder = classifyFollowUp(a.nextFollowUp).dayDifference - classifyFollowUp(b.nextFollowUp).dayDifference;
+    return dayOrder || (priorityRank[a.priority] ?? 3) - (priorityRank[b.priority] ?? 3) || a.name.localeCompare(b.name);
+  });
+  $("daily-action-empty").classList.toggle("hidden", actionLeads.length > 0);
+  $("daily-action-list").innerHTML = actionLeads.map((lead) => {
+    const followUp = classifyFollowUp(lead.nextFollowUp);
+    return `<article class="daily-action-row"><div class="daily-action-summary"><strong>${escapeHtml(lead.name)}</strong><span class="muted daily-action-detail">${escapeHtml(lead.condition)}</span></div><span class="badge priority-pill priority-${lead.priority.toLowerCase()}">${escapeHtml(lead.priority)}</span>${followUpChip(followUp)}<span class="exact-date">${escapeHtml(followUp.exactDate)}</span></article>`;
+  }).join("");
 }
 function renderLeads() {
   $("result-count").textContent = filteredLeads.length;
   $("empty-state").classList.toggle("hidden", filteredLeads.length > 0);
-  $("lead-list").innerHTML = filteredLeads.map((lead) => { const status = normalizeStatus(lead.status); return `<article class="lead-card"><header><div><h3>${escapeHtml(lead.name)}</h3><p class="muted">${escapeHtml(lead.condition)}</p></div><span class="badge priority-pill priority-${lead.priority.toLowerCase()}">${lead.priority}</span></header><div class="badges"><span class="badge status-${status.toLowerCase().replace(/[^a-z0-9]+/g, "-")}">${escapeHtml(status)}</span><span class="badge type-${(lead.leadType || "New patient").toLowerCase().replace(/[^a-z0-9]+/g, "-")}">${escapeHtml(lead.leadType || "New patient")}</span>${lead.referralSource ? `<span class="badge referral-badge">${escapeHtml(lead.referralSource)}</span>` : ""}${lead.nextFollowUp ? `<span class="badge followup-badge">Follow up ${lead.nextFollowUp}</span>` : ""}</div><div class="card-grid"><span>☎ ${escapeHtml(lead.phone)}</span><span>✉ ${escapeHtml(lead.email || "No email")}</span><span>📍 ${escapeHtml(lead.location)}</span><span>Created ${new Date(lead.createdAt).toLocaleDateString()}</span></div>${lead.notes ? `<p>${escapeHtml(lead.notes)}</p>` : ""}<div class="card-actions"><button class="secondary" onclick="editLead('${lead.id}')">Edit</button><button class="ghost" onclick="deleteLead('${lead.id}')">Delete</button></div></article>`; }).join("");
+  $("lead-list").innerHTML = filteredLeads.map((lead) => { const status = normalizeStatus(lead.status); const followUp = classifyFollowUp(lead.nextFollowUp); return `<article class="lead-card"><header><div><h3>${escapeHtml(lead.name)}</h3><p class="muted">${escapeHtml(lead.condition)}</p></div><span class="badge priority-pill priority-${lead.priority.toLowerCase()}">${lead.priority}</span></header><div class="badges"><span class="badge status-${status.toLowerCase().replace(/[^a-z0-9]+/g, "-")}">${escapeHtml(status)}</span><span class="badge type-${(lead.leadType || "New patient").toLowerCase().replace(/[^a-z0-9]+/g, "-")}">${escapeHtml(lead.leadType || "New patient")}</span>${lead.referralSource ? `<span class="badge referral-badge">${escapeHtml(lead.referralSource)}</span>` : ""}${followUpChip(followUp)}${followUp.exactDate ? `<span class="exact-date">${escapeHtml(followUp.exactDate)}</span>` : ""}</div><div class="card-grid"><span>☎ ${escapeHtml(lead.phone)}</span><span>✉ ${escapeHtml(lead.email || "No email")}</span><span>📍 ${escapeHtml(lead.location)}</span><span>Created ${new Date(lead.createdAt).toLocaleDateString()}</span></div>${lead.notes ? `<p>${escapeHtml(lead.notes)}</p>` : ""}<div class="card-actions"><button class="secondary" onclick="editLead('${lead.id}')">Edit</button><button class="ghost" onclick="deleteLead('${lead.id}')">Delete</button></div></article>`; }).join("");
 }
 function clearFilters() { ["search", "filter-status", "filter-referral", "filter-priority", "filter-lead-type", "filter-followup"].forEach((id) => $(id).value = ""); $("sort-by").value = "newest"; render(); }
 function exportCsv(rows, filename) {

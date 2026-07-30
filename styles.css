@@ -38,6 +38,13 @@ h1, h2, p { margin-top: 0; }
 .dashboard span { display: block; font-size: 2rem; font-weight: 900; color: var(--primary-dark); }
 .dashboard p { margin-bottom: 0; color: var(--muted); }
 .content-grid { display: grid; grid-template-columns: minmax(280px, 390px) minmax(0, 1fr); gap: 1rem; align-items: start; }
+.daily-actions { margin-bottom: 1rem; }
+.daily-actions-heading { margin-bottom: .65rem; }
+.daily-actions-heading h2 { margin-bottom: 0; }
+.daily-action-list { display: grid; gap: .5rem; }
+.daily-action-row { display: grid; grid-template-columns: minmax(180px, 1fr) auto auto minmax(150px, auto); align-items: center; gap: .65rem; padding: .7rem .8rem; border: 1px solid var(--border); border-radius: 18px; background: #fff; }
+.daily-action-summary { display: grid; min-width: 0; }
+.daily-action-summary > * { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .content-grid > *, .panel, .list-panel { min-width: 0; }
 .panel { padding: 1rem; }
 .panel-heading { display: flex; justify-content: space-between; align-items: center; gap: 1rem; margin-bottom: 1rem; }
@@ -65,7 +72,12 @@ input:focus, select:focus, textarea:focus { outline: 3px solid rgba(23,79,71,.16
 .status-new-inquiry, .type-new-patient { background: var(--accent); color: var(--primary-dark); }
 .status-contacted { background: var(--sky); color: #24527a; }
 .status-booked { background: #dff7df; color: #176239; }
-.status-waiting-for-reply, .followup-badge { background: var(--accent); color: var(--primary-dark); }
+.status-waiting-for-reply { background: var(--accent); color: var(--primary-dark); }
+.followup-overdue { background: #fbe3e1; color: #8f2018; }
+.followup-today { background: #fff0c2; color: #7b4800; }
+.followup-future { background: var(--accent); color: var(--primary-dark); }
+.followup-none { background: #eceff1; color: #4f5b62; }
+.exact-date { color: var(--muted); font-size: .86rem; }
 .status-completed { background: #e4f3ef; color: var(--primary-dark); }
 .status-lost { background: #eceff1; color: #4f5b62; }
 .type-returning-patient { background: #eee7ff; color: #5940a8; }
@@ -73,7 +85,8 @@ input:focus, select:focus, textarea:focus { outline: 3px solid rgba(23,79,71,.16
 .card-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .35rem .8rem; color: var(--muted); overflow-wrap: anywhere; }
 .card-actions { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: .8rem; }
 .empty { text-align: center; padding: 2rem; border: 1px dashed var(--border); border-radius: 18px; color: var(--muted); }
+.empty.compact { padding: .8rem 1rem; text-align: left; }
 @media (min-width: 561px) { #search { grid-column: span 2; } }
 @media (max-width: 1160px) { .content-grid { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 900px) { .topbar { display: grid; } .dashboard, .filters { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media (max-width: 560px) { .app-shell { padding: .6rem; } .login-card { padding: 1.25rem; } .form-grid, .card-grid, .dashboard, .filters { grid-template-columns: minmax(0, 1fr); } .topbar-actions, .card-actions { flex-direction: column; } button { width: 100%; } .lead-card header { display: grid; } }
+@media (max-width: 560px) { .app-shell { padding: .6rem; } .login-card { padding: 1.25rem; } .form-grid, .card-grid, .dashboard, .filters { grid-template-columns: minmax(0, 1fr); } .topbar-actions, .card-actions { flex-direction: column; } button { width: 100%; } .lead-card header { display: grid; } .daily-action-row { grid-template-columns: minmax(0, 1fr) auto; } .daily-action-detail, .daily-action-row .priority-pill, .daily-action-row .exact-date { display: none; } }
