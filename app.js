@@ -230,6 +230,7 @@ function bindEvents() {
   $("login-form").addEventListener("submit", handleLogin);
   $("logout").addEventListener("click", async () => { await api("/logout", { method: "POST", body: "{}" }).catch(() => {}); showAuthenticatedView(false); });
   $("lead-form").addEventListener("submit", handleSave);
+  $("add-lead-disclosure").addEventListener("click", toggleLeadForm);
   $("lead-form").addEventListener("input", clearDuplicateWarning);
   $("save-anyway").addEventListener("click", () => pendingDuplicateSave && persistLead(pendingDuplicateSave));
   $("review-duplicate").addEventListener("click", reviewDuplicate);
@@ -247,6 +248,13 @@ function bindEvents() {
   document.querySelectorAll("[data-dialog-close]").forEach((button) => button.addEventListener("click", closeContactDialog));
   document.addEventListener("click", closeOpenMenus);
   document.addEventListener("keydown", handleGlobalKeydown);
+}
+function toggleLeadForm() {
+  const button = $("add-lead-disclosure");
+  const opening = button.getAttribute("aria-expanded") !== "true";
+  button.setAttribute("aria-expanded", String(opening));
+  $("lead-form").classList.toggle("is-open", opening);
+  if (opening) $("name").focus();
 }
 async function handleLogin(event) {
   event.preventDefault();
@@ -343,6 +351,8 @@ function editLead(id) {
   $("lastContactedAt").value = toDateTimeLocal(lead.lastContactedAt);
   $("lead-id").value = id; $("form-title").textContent = "Edit lead"; $("save-lead").textContent = "Update lead"; $("cancel-edit").classList.remove("hidden");
   $("edit-history").classList.remove("hidden"); $("edit-history").innerHTML = activityHistoryMarkup(lead);
+  $("lead-form").classList.add("is-open");
+  $("add-lead-disclosure").setAttribute("aria-expanded", "true");
   scrollTo({ top: 0, behavior: "smooth" });
 }
 function toDateTimeLocal(value) { if (!value) return ""; const date = new Date(value); const offset = date.getTimezoneOffset() * 60000; return Number.isNaN(date.getTime()) ? "" : new Date(date - offset).toISOString().slice(0, 16); }

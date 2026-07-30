@@ -16,13 +16,16 @@
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 * { box-sizing: border-box; }
-body { margin: 0; background: linear-gradient(135deg, var(--bg), #edf8f4); color: var(--ink); }
+html, body { max-width: 100%; overflow-x: hidden; }
+body { margin: 0; background: linear-gradient(135deg, var(--bg), #edf8f4); color: var(--ink); overflow-wrap: anywhere; }
 button, input, select, textarea { font: inherit; }
 button { border: 0; border-radius: 999px; background: var(--primary); color: white; padding: .85rem 1.1rem; font-weight: 800; cursor: pointer; }
 button:hover { background: var(--primary-dark); }
 button:disabled { cursor: wait; opacity: .65; }
 button.secondary { background: var(--accent); color: var(--primary-dark); }
 button.ghost { background: transparent; color: var(--primary-dark); border: 1px solid var(--border); }
+button:focus-visible, a:focus-visible, summary:focus-visible, [role="menuitem"]:focus-visible,
+input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px solid rgba(23,79,71,.38); outline-offset: 2px; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 .hidden { display: none !important; }
 .app-shell { width: min(1180px, 100%); margin: 0 auto; padding: 1rem; }
@@ -43,6 +46,7 @@ h1, h2, p { margin-top: 0; }
 .dashboard strong, .dashboard small { display: block; }
 .dashboard small { margin-top: .2rem; color: var(--muted); font-weight: 600; }
 .content-grid { display: grid; grid-template-columns: minmax(280px, 390px) minmax(0, 1fr); gap: 1rem; align-items: start; }
+.add-lead-disclosure { display: none; }
 .daily-actions { margin-bottom: 1rem; }
 .daily-actions-heading { margin-bottom: .65rem; }
 .daily-actions-heading h2 { margin-bottom: 0; }
@@ -67,7 +71,7 @@ input:focus, select:focus, textarea:focus { outline: 3px solid rgba(23,79,71,.16
 .duplicate-warning p { margin-bottom: .7rem; }
 .duplicate-actions { display: flex; flex-wrap: wrap; gap: .55rem; }
 .filters { grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr)); margin-bottom: 1rem; }
-.filters > * { min-width: 0; }
+.filters > *, .filter-control { min-width: 0; }
 .filter-heading h3 { display: flex; align-items: center; gap: .5rem; margin: 0 0 .65rem; }
 .filter-count { display: inline-grid; min-width: 1.7rem; min-height: 1.7rem; padding: .15rem .45rem; place-items: center; border-radius: 999px; background: var(--primary); color: white; font-size: .8rem; }
 .lead-list { display: grid; gap: .85rem; }
@@ -109,7 +113,7 @@ input:focus, select:focus, textarea:focus { outline: 3px solid rgba(23,79,71,.16
 .card-actions { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: .8rem; }
 .card-actions > button, .card-actions .more-actions > button { min-height: 44px; }
 .more-actions { position: relative; }
-.more-menu { position: absolute; z-index: 5; right: 0; bottom: calc(100% + .35rem); min-width: 150px; padding: .35rem; border: 1px solid var(--border); border-radius: 14px; background: white; box-shadow: var(--shadow); }
+.more-menu { position: absolute; z-index: 5; right: 0; bottom: calc(100% + .35rem); width: max-content; min-width: 150px; max-width: min(260px, calc(100vw - 2rem)); padding: .35rem; border: 1px solid var(--border); border-radius: 14px; background: white; box-shadow: var(--shadow); }
 .more-menu button { width: 100%; border-radius: 10px; text-align: left; }
 .danger-action { background: #fbe3e1; color: var(--danger); }
 .danger-action:hover { background: #f5cbc7; }
@@ -130,8 +134,8 @@ summary { width: fit-content; color: var(--primary-dark); font-weight: 800; curs
 .dialog-heading h2, .dialog-heading p, #contact-lead-name { margin-bottom: 0; }
 .icon-button { width: 44px; height: 44px; padding: 0; font-size: 1.5rem; }
 .dialog-actions { justify-content: flex-end; margin-top: .25rem; }
-@media (min-width: 561px) { #search { grid-column: span 2; } }
-@media (min-width: 901px) { .filters { grid-template-columns: repeat(4, minmax(0, 1fr)); } #search { grid-column: span 3; } }
+@media (min-width: 561px) { .search-control { grid-column: span 2; } }
+@media (min-width: 901px) { .filters { grid-template-columns: repeat(4, minmax(0, 1fr)); } .search-control { grid-column: span 3; } }
 @media (max-width: 1160px) { .content-grid { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 900px) { .topbar { display: grid; } .dashboard, .filters { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 560px) {
@@ -139,7 +143,11 @@ summary { width: fit-content; color: var(--primary-dark); font-weight: 800; curs
   .login-card { padding: 1.25rem; }
   .form-grid, .card-grid, .dashboard, .filters, .contact-actions { grid-template-columns: minmax(0, 1fr); }
   .topbar-actions { flex-direction: column; }
-  button { width: 100%; }
+  .topbar-actions > button, #lead-form > #save-lead, .duplicate-actions > button { width: 100%; }
+  .add-lead-disclosure { display: block; width: 100%; min-height: 48px; text-align: left; }
+  .add-lead-disclosure::after { content: " +"; float: right; }
+  .add-lead-disclosure[aria-expanded="true"]::after { content: " −"; }
+  .lead-form-panel:not(.is-open) { display: none; }
   .lead-card { padding: .8rem; overflow: visible; }
   .mobile-summary { display: flex; align-items: flex-start; justify-content: space-between; gap: .6rem; }
   .mobile-summary > div { min-width: 0; }
@@ -150,7 +158,8 @@ summary { width: fit-content; color: var(--primary-dark); font-weight: 800; curs
   .lead-card-details { display: none; padding-top: .85rem; }
   .lead-card.is-expanded .lead-card-details { display: block; }
   .lead-card-details > header { display: none; }
-  .card-actions { display: grid; grid-template-columns: 1fr 1fr auto; }
+  .card-actions { display: flex; flex-wrap: wrap; }
+  .card-actions > button { flex: 1 1 auto; width: auto; }
   .card-actions .more-actions > button { width: auto; }
   .daily-action-row { grid-template-columns: minmax(0, 1fr) auto; }
   .daily-action-detail, .daily-action-row .priority-pill, .daily-action-row .exact-date { display: none; }
