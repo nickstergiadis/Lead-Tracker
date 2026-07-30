@@ -43,6 +43,7 @@ let contactDialogTrigger = null;
 let activeMetricFilter = "";
 let saveInProgress = false;
 let pendingDuplicateSave = null;
+let storageRecoveryError = "";
 const $ = (id) => document.getElementById(id);
 
 function normalizeStatus(value) {
@@ -114,21 +115,33 @@ function normalizeLead(rawLead) {
   return normalizedLead;
 }
 function loadLeads() {
-  const saved = localStorage.getItem(STORAGE_KEY);
-  if (!saved) return demoLeads.map(normalizeLead);
   try {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    // A missing key is first use. An empty or otherwise invalid stored value is
+    // persisted data that needs recovery and must not be replaced with examples.
+    if (saved === null) return demoLeads.map(normalizeLead);
     const parsed = JSON.parse(saved);
     if (!Array.isArray(parsed)) throw new TypeError("Stored leads must be an array");
-    const normalized = parsed.map(normalizeLead);
-    // Only migrate storage after the entire payload has parsed and normalized successfully.
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(normalized));
-    return normalized;
-  } catch (error) {
-    console.error("Unable to load stored leads; leaving storage unchanged.", error);
-    return demoLeads.map(normalizeLead);
+    return parsed.map(normalizeLead);
+  } catch {
+    storageRecoveryError = "Saved lead data could not be loaded. The stored data was left unchanged; recover or clear it before saving.";
+    console.error("Saved lead data could not be loaded; storage was left unchanged.");
+    return [];
   }
 }
-function saveLeads() { localStorage.setItem(STORAGE_KEY, JSON.stringify(leads)); }
+function saveLeads(records = leads) {
+  if (storageRecoveryError) {
+    console.error("Lead data was not written while stored data awaits recovery.");
+    return false;
+  }
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(records));
+    return true;
+  } catch {
+    console.error("Lead data could not be written to storage.");
+    return false;
+  }
+}
 function localDateParts(date = new Date()) {
   return { year: date.getFullYear(), month: date.getMonth() + 1, day: date.getDate() };
 }
@@ -262,7 +275,10 @@ function showAuthenticatedView() {
   const authed = sessionStorage.getItem(AUTH_KEY) === "true";
   $("login-view").classList.toggle("hidden", authed);
   $("app-view").classList.toggle("hidden", !authed);
-  if (authed) render();
+  if (authed) {
+    render();
+    if (storageRecoveryError) announce(storageRecoveryError);
+  }
 }
 function getFormData() {
   return { name: $("name").value.trim(), phone: $("phone").value.trim(), email: $("email").value.trim(), location: $("location").value.trim(), referralSource: $("referralSource").value.trim(), condition: $("condition").value.trim(), status: $("status").value, priority: $("priority").value, leadType: $("leadType").value, nextFollowUp: $("nextFollowUp").value, nextAction: $("nextAction").value.trim(), lastContactedAt: $("lastContactedAt").value, lastContactMethod: $("lastContactMethod").value, notes: $("notes").value.trim() };
@@ -299,36 +315,36 @@ function persistLead({ fields, existingId }) {
   saveInProgress = true;
   $("save-lead").disabled = true;
   $("save-anyway").disabled = true;
-  const previousLeads = leads;
   try {
     const existing = leads.find((lead) => lead.id === existingId);
-  if (existing) {
-    const now = new Date().toISOString();
-    const activities = [...existing.activities];
-    if (existing.status !== fields.status) {
-      const specializedType = ({ [STATUSES.BOOKED]: ACTIVITY_TYPES.BOOKED, [STATUSES.COMPLETED]: ACTIVITY_TYPES.COMPLETED, [STATUSES.LOST]: ACTIVITY_TYPES.LOST })[fields.status];
-      activities.push(createActivity(existing.id, specializedType || ACTIVITY_TYPES.STATUS_CHANGED, now, "", `${existing.status} → ${fields.status}`));
+    let nextLeads;
+    if (existing) {
+      const now = new Date().toISOString();
+      const activities = [...existing.activities];
+      if (existing.status !== fields.status) {
+        const specializedType = ({ [STATUSES.BOOKED]: ACTIVITY_TYPES.BOOKED, [STATUSES.COMPLETED]: ACTIVITY_TYPES.COMPLETED, [STATUSES.LOST]: ACTIVITY_TYPES.LOST })[fields.status];
+        activities.push(createActivity(existing.id, specializedType || ACTIVITY_TYPES.STATUS_CHANGED, now, "", `${existing.status} → ${fields.status}`));
+      }
+      if (existing.nextFollowUp !== fields.nextFollowUp) activities.push(createActivity(existing.id, ACTIVITY_TYPES.FOLLOW_UP_CHANGED, now, "", describeFollowUpChange(existing.nextFollowUp, fields.nextFollowUp)));
+      if (existing.lastContactedAt !== fields.lastContactedAt || existing.lastContactMethod !== fields.lastContactMethod) {
+        activities.push(createActivity(existing.id, ACTIVITY_TYPES.CONTACTED, fields.lastContactedAt ? new Date(fields.lastContactedAt).toISOString() : now, fields.lastContactMethod, "Contact details updated"));
+      }
+      const updated = { ...existing, ...fields, activities };
+      if (fields.status === STATUSES.BOOKED && !updated.bookedAt) updated.bookedAt = now;
+      nextLeads = leads.map((lead) => lead.id === existing.id ? updated : lead);
+    } else {
+      const now = new Date().toISOString();
+      const id = crypto.randomUUID();
+      const lead = normalizeLead({ id, createdAt: now, ...fields, bookedAt: fields.status === STATUSES.BOOKED ? now : "", activities: [createActivity(id, ACTIVITY_TYPES.LEAD_CREATED, now)] });
+      nextLeads = [lead, ...leads];
     }
-    if (existing.nextFollowUp !== fields.nextFollowUp) activities.push(createActivity(existing.id, ACTIVITY_TYPES.FOLLOW_UP_CHANGED, now, "", describeFollowUpChange(existing.nextFollowUp, fields.nextFollowUp)));
-    if (existing.lastContactedAt !== fields.lastContactedAt || existing.lastContactMethod !== fields.lastContactMethod) {
-      activities.push(createActivity(existing.id, ACTIVITY_TYPES.CONTACTED, fields.lastContactedAt ? new Date(fields.lastContactedAt).toISOString() : now, fields.lastContactMethod, "Contact details updated"));
-    }
-    const updated = { ...existing, ...fields, activities };
-    if (fields.status === STATUSES.BOOKED && !updated.bookedAt) updated.bookedAt = now;
-    leads = leads.map((lead) => lead.id === existing.id ? updated : lead);
-  } else {
-    const now = new Date().toISOString();
-    const id = crypto.randomUUID();
-    const lead = normalizeLead({ id, createdAt: now, ...fields, bookedAt: fields.status === STATUSES.BOOKED ? now : "", activities: [createActivity(id, ACTIVITY_TYPES.LEAD_CREATED, now)] });
-    leads = [lead, ...leads];
-  }
-    saveLeads();
+    if (!saveLeads(nextLeads)) throw new Error("Storage write failed");
+    leads = nextLeads;
     resetForm();
     render();
     announce(`${fields.name} ${existing ? "updated" : "created"} successfully.`);
   } catch (error) {
-    leads = previousLeads;
-    console.error("Unable to save lead.", error);
+    console.error("Unable to save lead changes.");
     $("form-error").textContent = "The lead could not be saved. Your entries have been preserved; try again.";
     announce("Lead could not be saved. Your entries have been preserved.");
   } finally {
@@ -370,7 +386,17 @@ function editLead(id) {
   scrollTo({ top: 0, behavior: "smooth" });
 }
 function toDateTimeLocal(value) { if (!value) return ""; const date = new Date(value); const offset = date.getTimezoneOffset() * 60000; return Number.isNaN(date.getTime()) ? "" : new Date(date - offset).toISOString().slice(0, 16); }
-function deleteLead(id) { if (confirm("Delete this lead?")) { leads = leads.filter((l) => l.id !== id); saveLeads(); render(); } }
+function deleteLead(id) {
+  if (!confirm("Delete this lead?")) return;
+  const nextLeads = leads.filter((lead) => lead.id !== id);
+  if (!saveLeads(nextLeads)) {
+    announce("The lead could not be deleted because the change was not saved. Try again.");
+    return;
+  }
+  leads = nextLeads;
+  render();
+  announce("Lead deleted successfully.");
+}
 function handleLeadListClick(event) {
   const action = event.target.closest("[data-action]");
   if (!action || !$("lead-list").contains(action)) return;
@@ -458,14 +484,11 @@ function handleContactSave(event) {
   const contactedAt = contactedDate.toISOString();
   const updated = { ...existing, lastContactedAt: contactedAt, lastContactMethod: method, activities: [...existing.activities, createActivity(id, ACTIVITY_TYPES.CONTACTED, contactedAt, method, note)] };
   const nextLeads = leads.map((lead) => lead.id === id ? updated : lead);
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(nextLeads));
-    leads = nextLeads;
-  } catch (error) {
-    console.error("Unable to save contact activity.", error);
+  if (!saveLeads(nextLeads)) {
     $("contact-error").textContent = "Contact activity could not be saved. Try again.";
     return;
   }
+  leads = nextLeads;
   closeContactDialog();
   render();
   announce(`${existing.name} marked contacted.`);
