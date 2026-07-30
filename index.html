@@ -13,12 +13,32 @@
         <h1 id="login-title">Restore at Home</h1>
         <p class="muted">Lead tracker for mobile physiotherapy inquiries.</p>
         <form id="login-form" novalidate>
+          <label for="login-username">Username</label>
+          <input id="login-username" autocomplete="username" maxlength="32" required />
           <label for="password">Password</label>
           <input id="password" type="password" autocomplete="current-password" placeholder="Enter password" required />
           <p id="login-error" class="error" role="alert"></p>
           <button type="submit">Sign in</button>
         </form>
+        <div class="auth-links"><button id="show-register" class="link-button" type="button">Register with an invitation</button><button id="show-recover" class="link-button" type="button">Recover account</button></div>
       </section>
+
+      <section id="register-view" class="login-card hidden" aria-labelledby="register-title">
+        <h1 id="register-title">Create account</h1>
+        <form id="register-form" novalidate>
+          <label>Invitation code<input id="register-invitation" maxlength="128" required /></label>
+          <label>Username<input id="register-username" minlength="3" maxlength="32" autocomplete="username" required /></label>
+          <label>Display name<input id="register-display-name" maxlength="100" autocomplete="name" required /></label>
+          <label>Password<input id="register-password" type="password" minlength="12" maxlength="128" autocomplete="new-password" required /></label>
+          <label>Confirm password<input id="register-confirm" type="password" maxlength="128" autocomplete="new-password" required /></label>
+          <p class="muted">Use 12+ characters including upper/lowercase letters, a number, and a symbol.</p><p id="register-error" class="error" role="alert"></p>
+          <button type="submit">Create account</button><button class="ghost auth-back" type="button">Back</button>
+        </form>
+      </section>
+      <section id="recover-view" class="login-card hidden"><h1>Recover account</h1><form id="recover-form">
+        <label>Username<input id="recover-username" maxlength="32" autocomplete="username" required /></label><label>Recovery code<input id="recover-code" maxlength="128" autocomplete="off" required /></label><label>New password<input id="recover-password" type="password" minlength="12" maxlength="128" autocomplete="new-password" required /></label><p id="recover-error" class="error" role="alert"></p><button>Reset password</button><button class="ghost auth-back" type="button">Back</button>
+      </form></section>
+      <section id="recovery-code-view" class="login-card recovery-card hidden"><h1>Save your recovery code</h1><p>This code will never be shown again. Print or download it before continuing.</p><output id="one-time-recovery-code" class="recovery-code"></output><div class="recovery-actions"><button id="print-recovery" type="button">Print</button><button id="download-recovery" type="button" class="secondary">Download text</button></div><label><input id="recovery-saved" type="checkbox" /> I saved this recovery code securely.</label><button id="finish-recovery" type="button" disabled>Continue</button></section>
 
       <section id="app-view" class="hidden">
         <header class="topbar">
@@ -31,9 +51,12 @@
             <button id="import-browser" class="secondary hidden">Import browser backup</button>
             <button id="export-filtered" class="secondary">Export filtered CSV</button>
             <button id="export-all" class="secondary">Export all CSV</button>
+            <button id="security-toggle" class="secondary">Security</button>
             <button id="logout" class="ghost">Log out</button>
           </div>
         </header>
+        <section id="security-view" class="panel security-panel hidden"><h2>Security settings</h2><form id="password-change-form"><label>Current password<input id="current-password" type="password" autocomplete="current-password" required /></label><label>New strong password<input id="new-password" type="password" minlength="12" maxlength="128" autocomplete="new-password" required /></label><button>Change password</button></form><form id="recovery-regenerate-form"><label>Current password<input id="recovery-current-password" type="password" autocomplete="current-password" required /></label><button>Generate replacement recovery code</button></form><button id="revoke-other-sessions" class="secondary" type="button">Revoke other sessions</button><div id="session-list"></div><p id="security-message" role="status"></p></section>
+        <section id="admin-view" class="panel security-panel hidden"><h2>Administrator controls</h2><form id="invitation-form"><label>Invitation lifetime (hours)<input id="invitation-hours" type="number" min="1" max="168" value="24" /></label><button>Create invitation</button></form><output id="new-invitation-code"></output><div id="invitation-list"></div><h3>Accounts</h3><div id="admin-user-list"></div><p id="admin-message" role="status"></p></section>
 
         <section class="dashboard" aria-label="Lead summary">
           <button type="button" class="metric-card" data-metric-filter="open" aria-pressed="false"><span id="open-leads">0</span><strong>Open leads</strong></button>
