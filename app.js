@@ -16,6 +16,10 @@ const STATUS_MIGRATIONS = Object.freeze({
   "Not a fit": STATUSES.LOST
 });
 const priorities = ["Low", "Medium", "High"];
+const PRIORITY_RANK = Object.freeze({ High: 0, Medium: 1, Low: 2 });
+const MISSING_DATE_RANK = Number.POSITIVE_INFINITY;
+const DEFAULT_SORT = "newest";
+const SEARCH_FIELDS = Object.freeze(["name", "phone", "email", "location", "condition", "referralSource", "notes", "nextAction"]);
 const leadTypes = ["New patient", "Returning patient"];
 const CONTACT_METHODS = Object.freeze(["Phone", "Email", "Text", "In person", "Other"]);
 const ACTIVITY_TYPES = Object.freeze({
@@ -44,7 +48,10 @@ function normalizeStatus(value) {
   return Object.hasOwn(STATUS_MIGRATIONS, value) ? STATUS_MIGRATIONS[value] : STATUSES.NEW_INQUIRY;
 }
 function isOpenLead(lead) {
-  return ![STATUSES.COMPLETED, STATUSES.LOST].includes(normalizeStatus(lead.status));
+  return ![STATUSES.COMPLETED, STATUSES.LOST].includes(lead._status || normalizeStatus(lead.status));
+}
+function searchableText(lead) {
+  return SEARCH_FIELDS.map((field) => String(lead[field] || "").toLocaleLowerCase()).join(" ");
 }
 function normalizeLead(rawLead) {
   if (!rawLead || typeof rawLead !== "object" || Array.isArray(rawLead)) throw new TypeError("Invalid lead record");
@@ -120,9 +127,29 @@ function classifyFollowUp(value, now = new Date()) {
 function isRealTimestamp(value) {
   return typeof value === "string" && value.trim() !== "" && !Number.isNaN(new Date(value).getTime());
 }
+function timestampRank(value) {
+  const timestamp = new Date(String(value || "")).getTime();
+  return Number.isNaN(timestamp) ? MISSING_DATE_RANK : timestamp;
+}
+function compareDateRanks(a, b, direction = 1) {
+  const aMissing = a === MISSING_DATE_RANK;
+  const bMissing = b === MISSING_DATE_RANK;
+  if (aMissing || bMissing) return aMissing === bMissing ? 0 : aMissing ? 1 : -1;
+  return (a - b) * direction;
+}
+function prepareLead(lead, now = new Date()) {
+  return {
+    ...lead,
+    _searchableText: searchableText(lead),
+    _status: normalizeStatus(lead.status),
+    _followUp: classifyFollowUp(lead.nextFollowUp, now),
+    _createdTime: timestampRank(lead.createdAt),
+    _priorityRank: PRIORITY_RANK[lead.priority] ?? Object.keys(PRIORITY_RANK).length
+  };
+}
 function calculateMetrics(records, now = new Date()) {
-  const todayOrOverdue = (lead) => isOpenLead(lead) && ["today", "overdue"].includes(classifyFollowUp(lead.nextFollowUp, now).state);
-  const overdue = (lead) => isOpenLead(lead) && classifyFollowUp(lead.nextFollowUp, now).state === "overdue";
+  const todayOrOverdue = (lead) => isOpenLead(lead) && ["today", "overdue"].includes(lead._followUp.state);
+  const overdue = (lead) => isOpenLead(lead) && lead._followUp.state === "overdue";
   const bookedThisMonth = (lead) => {
     if (!isRealTimestamp(lead.bookedAt)) return false;
     const booked = new Date(lead.bookedAt);
@@ -342,11 +369,10 @@ function announce(message) {
   requestAnimationFrame(() => { $("app-feedback").textContent = message; });
 }
 function getFilteredLeads() {
-  const q = $("search").value.toLowerCase();
-  const fields = ["name", "phone", "email", "location", "condition", "notes", "nextAction"];
-  const metricPredicate = calculateMetrics(leads).predicates[activeMetricFilter] || (() => true);
-  return leads.filter(metricPredicate).filter((lead) => fields.some((field) => String(lead[field] || "").toLowerCase().includes(q)))
-    .filter((lead) => !$("filter-status").value || normalizeStatus(lead.status) === $("filter-status").value)
+  const q = String($("search").value || "").toLocaleLowerCase();
+  const metricPredicate = calculateMetrics(preparedLeads).predicates[activeMetricFilter] || (() => true);
+  return preparedLeads.filter(metricPredicate).filter((lead) => lead._searchableText.includes(q))
+    .filter((lead) => !$("filter-status").value || lead._status === $("filter-status").value)
     .filter((lead) => !$("filter-referral").value || lead.referralSource === $("filter-referral").value)
     .filter((lead) => !$("filter-priority").value || lead.priority === $("filter-priority").value)
     .filter((lead) => !$("filter-lead-type").value || (lead.leadType || "New patient") === $("filter-lead-type").value)
@@ -355,12 +381,19 @@ function getFilteredLeads() {
 }
 function sortLeads(a, b) {
   const sort = $("sort-by").value;
-  if (sort === "followup") return (a.nextFollowUp || "9999-12-31").localeCompare(b.nextFollowUp || "9999-12-31");
-  if (sort === "status") return statuses.indexOf(normalizeStatus(a.status)) - statuses.indexOf(normalizeStatus(b.status));
-  if (sort === "priority") return priorities.indexOf(b.priority) - priorities.indexOf(a.priority);
-  return new Date(b.createdAt) - new Date(a.createdAt);
+  const followUpRank = (lead) => lead._followUp.dayDifference ?? MISSING_DATE_RANK;
+  const stableTieBreak = () => String(a.name || "").localeCompare(String(b.name || ""), undefined, { sensitivity: "base" }) || String(a.id || "").localeCompare(String(b.id || ""));
+  let order = 0;
+  if (sort === "oldest") order = compareDateRanks(a._createdTime, b._createdTime);
+  else if (sort === "followup-soonest") order = compareDateRanks(followUpRank(a), followUpRank(b));
+  else if (sort === "most-overdue") order = compareDateRanks(followUpRank(a), followUpRank(b));
+  else if (sort === "highest-priority") order = a._priorityRank - b._priorityRank;
+  else if (sort === "name") order = String(a.name || "").localeCompare(String(b.name || ""), undefined, { sensitivity: "base" });
+  else order = compareDateRanks(a._createdTime, b._createdTime, -1);
+  return order || stableTieBreak();
 }
-function render() { updateReferralFilters(); filteredLeads = getFilteredLeads(); renderDashboard(); renderDailyActions(); renderLeads(); }
+let preparedLeads = [];
+function render() { updateReferralFilters(); preparedLeads = leads.map((lead) => prepareLead(lead)); filteredLeads = getFilteredLeads(); renderDashboard(); renderDailyActions(); renderLeads(); renderActiveFilterCount(); }
 function updateReferralFilters() {
   const current = $("filter-referral").value;
   $("filter-referral").innerHTML = '<option value="">All referral sources</option>';
@@ -369,7 +402,7 @@ function updateReferralFilters() {
   $("filter-referral").value = current;
 }
 function renderDashboard() {
-  const metrics = calculateMetrics(leads);
+  const metrics = calculateMetrics(preparedLeads);
   $("open-leads").textContent = metrics.open;
   $("action-leads").textContent = metrics.needsAction;
   $("overdue-leads").textContent = metrics.overdue;
@@ -382,17 +415,16 @@ function followUpChip(followUp) {
   return `<span class="badge followup-badge followup-${followUp.state}" title="${escapeHtml(followUp.relativeLabel + exactDate)}" aria-label="${escapeHtml(followUp.relativeLabel + exactDate)}">${escapeHtml(followUp.relativeLabel)}</span>`;
 }
 function renderDailyActions() {
-  const priorityRank = { High: 0, Medium: 1, Low: 2 };
-  const actionLeads = leads.filter((lead) => {
-    const state = classifyFollowUp(lead.nextFollowUp).state;
+  const actionLeads = preparedLeads.filter((lead) => {
+    const state = lead._followUp.state;
     return isOpenLead(lead) && (state === "overdue" || state === "today");
   }).sort((a, b) => {
-    const dayOrder = classifyFollowUp(a.nextFollowUp).dayDifference - classifyFollowUp(b.nextFollowUp).dayDifference;
-    return dayOrder || (priorityRank[a.priority] ?? 3) - (priorityRank[b.priority] ?? 3) || a.name.localeCompare(b.name);
+    const dayOrder = a._followUp.dayDifference - b._followUp.dayDifference;
+    return dayOrder || a._priorityRank - b._priorityRank || a.name.localeCompare(b.name);
   });
   $("daily-action-empty").classList.toggle("hidden", actionLeads.length > 0);
   $("daily-action-list").innerHTML = actionLeads.map((lead) => {
-    const followUp = classifyFollowUp(lead.nextFollowUp);
+    const followUp = lead._followUp;
     return `<article class="daily-action-row"><div class="daily-action-summary"><strong>${escapeHtml(lead.name)}</strong><span class="muted daily-action-detail">${escapeHtml(lead.condition)}</span></div><span class="badge priority-pill priority-${lead.priority.toLowerCase()}">${escapeHtml(lead.priority)}</span>${followUpChip(followUp)}<span class="exact-date">${escapeHtml(followUp.exactDate)}</span></article>`;
   }).join("");
 }
@@ -400,6 +432,12 @@ function renderLeads() {
   $("result-count").textContent = filteredLeads.length;
   $("empty-state").classList.toggle("hidden", filteredLeads.length > 0);
   $("lead-list").innerHTML = filteredLeads.map(leadCardMarkup).join("");
+}
+function renderActiveFilterCount() {
+  const controlIds = ["search", "filter-status", "filter-referral", "filter-priority", "filter-lead-type", "filter-followup"];
+  const count = controlIds.filter((id) => Boolean($(id).value)).length + Number(Boolean(activeMetricFilter)) + Number($("sort-by").value !== DEFAULT_SORT);
+  $("active-filter-count").textContent = count;
+  $("active-filter-count").classList.toggle("hidden", count === 0);
 }
 function handleMetricFilter(event) {
   const card = event.target.closest("[data-metric-filter]");
@@ -411,8 +449,8 @@ function handleMetricFilter(event) {
   announce(`${label} filter applied. ${filteredLeads.length} ${filteredLeads.length === 1 ? "lead" : "leads"} showing.`);
 }
 function leadCardMarkup(lead) {
-  const status = normalizeStatus(lead.status);
-  const followUp = classifyFollowUp(lead.nextFollowUp);
+  const status = lead._status;
+  const followUp = lead._followUp;
   const slug = (value) => value.toLowerCase().replace(/[^a-z0-9]+/g, "-");
   const id = escapeHtml(lead.id);
   const phoneUrl = lead.phone && isValidPhone(lead.phone) ? `tel:${encodeURIComponent(normalizePhone(lead.phone))}` : "";
@@ -426,7 +464,7 @@ function activityHistoryMarkup(lead) {
   const items = (activities) => activities.length ? `<ol class="activity-list">${activities.map((activity) => `<li><strong>${escapeHtml(activity.type)}</strong><time datetime="${escapeHtml(activity.activityAt)}">${formatDateTime(activity.activityAt)}</time>${activity.contactMethod ? `<span>${escapeHtml(activity.contactMethod)}</span>` : ""}${activity.note ? `<p>${escapeHtml(activity.note)}</p>` : ""}</li>`).join("")}</ol>` : '<p class="muted">No activity recorded.</p>';
   return `<section class="activity-history" aria-label="Activity history"><h4>Recent activity</h4>${items(sorted.slice(0, 3))}${sorted.length > 3 ? `<details><summary>View full history (${sorted.length})</summary>${items(sorted)}</details>` : ""}</section>`;
 }
-function clearFilters() { ["search", "filter-status", "filter-referral", "filter-priority", "filter-lead-type", "filter-followup"].forEach((id) => $(id).value = ""); $("sort-by").value = "newest"; activeMetricFilter = ""; render(); announce(`${filteredLeads.length} leads showing. Filters cleared.`); }
+function clearFilters() { ["search", "filter-status", "filter-referral", "filter-priority", "filter-lead-type", "filter-followup"].forEach((id) => $(id).value = ""); $("sort-by").value = DEFAULT_SORT; activeMetricFilter = ""; render(); announce(`${filteredLeads.length} leads showing. Filters cleared.`); }
 function exportCsv(rows, filename) {
   const headers = ["Name", "Phone", "Email", "Location", "Referral source", "Lead type", "Condition", "Status", "Lead priority", "Next follow-up date", "Notes", "Created at"];
   const csvRows = [headers, ...rows.map((l) => [l.name, l.phone, l.email, l.location, l.referralSource, l.leadType || "New patient", l.condition, normalizeStatus(l.status), l.priority, l.nextFollowUp, l.notes, l.createdAt])]

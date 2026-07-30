@@ -6,9 +6,9 @@ A simple, mobile-friendly lead/admin tracker for the Restore at Home mobile phys
 
 - Add, edit, and delete leads
 - Track name, phone, email, location, referral source, new/returning lead type, condition/reason for inquiry, status, priority, next follow-up date, and notes
-- Search by name, phone, email, location, condition, or notes
+- Search by name, phone, email, location, condition, referral source, notes, or next action
 - Filter by status, referral source, priority, new/returning lead type, and next follow-up date
-- Sort by newest, next follow-up date, status, or priority
+- Sort by newest, oldest, follow-up soonest, most overdue, highest priority, or name
 - Actionable dashboard metrics for open leads, follow-ups needing action, overdue follow-ups, monthly bookings, and tracked-history conversion
 - Export all leads or the currently filtered list to CSV
 - Required-field validation plus basic email and phone formatting checks
