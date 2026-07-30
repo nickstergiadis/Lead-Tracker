@@ -37,7 +37,7 @@ const demoLeads = [
   { id: crypto.randomUUID(), createdAt: "2026-06-18T14:30:00.000Z", name: "Marcus Lee", phone: "720-555-0144", email: "marcus@example.com", location: "Denver", referralSource: "Physician", condition: "Post-op knee rehab", status: "Booked", priority: "Medium", leadType: "Returning patient", nextFollowUp: "2026-06-29", notes: "Booked initial visit." },
   { id: crypto.randomUUID(), createdAt: "2026-06-16T11:15:00.000Z", name: "Priya Shah", phone: "970-555-0122", email: "", location: "Longmont", referralSource: "Friend", condition: "Balance and gait support", status: "Follow-up needed", priority: "High", leadType: "New patient", nextFollowUp: "2026-06-24", notes: "Left voicemail; call again." }
 ];
-let leads = loadLeads();
+let leads = [];
 let filteredLeads = [];
 let contactDialogTrigger = null;
 let activeMetricFilter = "";
@@ -48,6 +48,37 @@ const $ = (id) => document.getElementById(id);
 function normalizeStatus(value) {
   if (statuses.includes(value)) return value;
   return Object.hasOwn(STATUS_MIGRATIONS, value) ? STATUS_MIGRATIONS[value] : STATUSES.NEW_INQUIRY;
+}
+const CSV_COLUMNS = Object.freeze([
+  ["Name", "name"],
+  ["Phone", "phone"],
+  ["Email", "email"],
+  ["Location", "location"],
+  ["Condition", "condition"],
+  ["Notes", "notes"],
+  ["Status", (lead) => normalizeStatus(lead.status)],
+  ["Priority", "priority"],
+  ["Lead type", "leadType"],
+  ["Referral source", "referralSource"],
+  ["Next action", "nextAction"],
+  ["Follow-up date (YYYY-MM-DD)", "nextFollowUp"],
+  ["Last contacted date/time (ISO 8601)", (lead) => toIso8601(lead.lastContactedAt)],
+  ["Last contact method", "lastContactMethod"],
+  ["Booked date/time (ISO 8601)", (lead) => toIso8601(lead.bookedAt)],
+  ["Created date/time (ISO 8601)", (lead) => toIso8601(lead.createdAt)]
+]);
+function toIso8601(value) {
+  if (value === undefined || value === null || String(value).trim() === "") return "";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "" : date.toISOString();
+}
+function serializeLeadsToCsv(records, { includeBom = true } = {}) {
+  const escapeCell = (value) => `"${String(value ?? "").replace(/"/g, '""')}"`;
+  const rows = [
+    CSV_COLUMNS.map(([heading]) => heading),
+    ...records.map((lead) => CSV_COLUMNS.map(([, accessor]) => typeof accessor === "function" ? accessor(lead) : lead[accessor]))
+  ];
+  return `${includeBom ? "\uFEFF" : ""}${rows.map((row) => row.map(escapeCell).join(",")).join("\n")}`;
 }
 function isOpenLead(lead) {
   return ![STATUSES.COMPLETED, STATUSES.LOST].includes(lead._status || normalizeStatus(lead.status));
@@ -192,6 +223,7 @@ function isValidPhone(phone) { return /^\d{7,15}$/.test(normalizePhoneForMatch(p
 function isValidEmail(email) { return !email || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email); }
 
 function init() {
+  leads = loadLeads();
   statuses.forEach((status) => [$("status"), $("filter-status")].forEach((el) => el.add(new Option(status, status))));
   priorities.forEach((priority) => [$("priority"), $("filter-priority")].forEach((el) => el.add(new Option(priority, priority))));
   leadTypes.forEach((type) => [$("leadType"), $("filter-lead-type")].forEach((el) => el.add(new Option(type, type))));
@@ -540,12 +572,10 @@ function activityHistoryMarkup(lead) {
 }
 function clearFilters() { ["search", "filter-status", "filter-referral", "filter-priority", "filter-lead-type", "filter-followup"].forEach((id) => $(id).value = ""); $("sort-by").value = DEFAULT_SORT; activeMetricFilter = ""; render(); announce(`${filteredLeads.length} leads showing. Filters cleared.`); }
 function exportCsv(rows, filename) {
-  const headers = ["Name", "Phone", "Email", "Location", "Referral source", "Lead type", "Condition", "Status", "Lead priority", "Next follow-up date", "Notes", "Created at"];
-  const csvRows = [headers, ...rows.map((l) => [l.name, l.phone, l.email, l.location, l.referralSource, l.leadType || "New patient", l.condition, normalizeStatus(l.status), l.priority, l.nextFollowUp, l.notes, l.createdAt])]
-    .map((row) => row.map((cell) => `"${String(cell || "").replace(/"/g, '""')}"`).join(","));
-  const blob = new Blob([csvRows.join("\n")], { type: "text/csv;charset=utf-8" });
+  const blob = new Blob([serializeLeadsToCsv(rows)], { type: "text/csv;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const link = Object.assign(document.createElement("a"), { href: url, download: filename });
   link.click(); URL.revokeObjectURL(url);
 }
-init();
+if (typeof document !== "undefined") init();
+if (typeof module !== "undefined" && module.exports) module.exports = { normalizeStatus, serializeLeadsToCsv };
