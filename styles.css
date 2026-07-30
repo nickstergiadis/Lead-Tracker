@@ -84,6 +84,14 @@ input:focus, select:focus, textarea:focus { outline: 3px solid rgba(23,79,71,.16
 .referral-badge { background: var(--accent); color: var(--primary-dark); }
 .card-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .35rem .8rem; color: var(--muted); overflow-wrap: anywhere; }
 .card-actions { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: .8rem; }
+.lead-details { margin-top: .9rem; border-top: 1px solid var(--border); padding-top: .75rem; }
+summary { width: fit-content; color: var(--primary-dark); font-weight: 800; cursor: pointer; }
+.activity-history { margin-top: .8rem; }
+.activity-history h4 { margin: 0 0 .5rem; }
+.activity-list { display: grid; gap: .5rem; margin: 0; padding-left: 1.35rem; }
+.activity-list li { padding-left: .2rem; }
+.activity-list time, .activity-list span { display: block; color: var(--muted); font-size: .86rem; }
+.activity-list p { margin: .2rem 0 0; }
 .empty { text-align: center; padding: 2rem; border: 1px dashed var(--border); border-radius: 18px; color: var(--muted); }
 .empty.compact { padding: .8rem 1rem; text-align: left; }
 @media (min-width: 561px) { #search { grid-column: span 2; } }

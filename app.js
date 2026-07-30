@@ -17,6 +17,17 @@ const STATUS_MIGRATIONS = Object.freeze({
 });
 const priorities = ["Low", "Medium", "High"];
 const leadTypes = ["New patient", "Returning patient"];
+const CONTACT_METHODS = Object.freeze(["Phone", "Email", "Text", "In person", "Other"]);
+const ACTIVITY_TYPES = Object.freeze({
+  LEAD_CREATED: "Lead created",
+  STATUS_CHANGED: "Status changed",
+  FOLLOW_UP_CHANGED: "Follow-up changed",
+  CONTACTED: "Contacted",
+  BOOKED: "Booked",
+  COMPLETED: "Completed",
+  LOST: "Lost"
+});
+const activityTypes = Object.freeze(Object.values(ACTIVITY_TYPES));
 const demoLeads = [
   { id: crypto.randomUUID(), createdAt: "2026-06-20T09:00:00.000Z", name: "Amelia Grant", phone: "303-555-0198", email: "amelia@example.com", location: "Boulder", referralSource: "Google", condition: "Hip pain after fall", status: "New", priority: "High", leadType: "New patient", nextFollowUp: "2026-06-27", notes: "Prefers morning calls." },
   { id: crypto.randomUUID(), createdAt: "2026-06-18T14:30:00.000Z", name: "Marcus Lee", phone: "720-555-0144", email: "marcus@example.com", location: "Denver", referralSource: "Physician", condition: "Post-op knee rehab", status: "Booked", priority: "Medium", leadType: "Returning patient", nextFollowUp: "2026-06-29", notes: "Booked initial visit." },
@@ -37,7 +48,25 @@ function normalizeLead(rawLead) {
   if (!rawLead || typeof rawLead !== "object" || Array.isArray(rawLead)) throw new TypeError("Invalid lead record");
   const originalStatus = rawLead.status;
   const normalizedStatus = normalizeStatus(originalStatus);
-  const normalizedLead = { ...rawLead, status: normalizedStatus };
+  const activities = Array.isArray(rawLead.activities)
+    ? rawLead.activities.filter((activity) => activity && typeof activity === "object").map((activity) => ({
+      id: activity.id || crypto.randomUUID(),
+      leadId: activity.leadId || rawLead.id,
+      type: activityTypes.includes(activity.type) ? activity.type : ACTIVITY_TYPES.STATUS_CHANGED,
+      activityAt: activity.activityAt || activity.createdAt || rawLead.createdAt || new Date().toISOString(),
+      contactMethod: CONTACT_METHODS.includes(activity.contactMethod) ? activity.contactMethod : "",
+      note: typeof activity.note === "string" ? activity.note : "",
+      createdAt: activity.createdAt || new Date().toISOString()
+    })) : [];
+  const normalizedLead = {
+    ...rawLead,
+    status: normalizedStatus,
+    nextAction: typeof rawLead.nextAction === "string" ? rawLead.nextAction : "",
+    lastContactedAt: typeof rawLead.lastContactedAt === "string" ? rawLead.lastContactedAt : "",
+    lastContactMethod: CONTACT_METHODS.includes(rawLead.lastContactMethod) ? rawLead.lastContactMethod : "",
+    bookedAt: typeof rawLead.bookedAt === "string" ? rawLead.bookedAt : "",
+    activities
+  };
   // Preserve unknown legacy statuses so a migration can revisit them without data loss.
   if (normalizedStatus !== originalStatus && !Object.hasOwn(STATUS_MIGRATIONS, originalStatus)) normalizedLead.legacyStatus = originalStatus;
   return normalizedLead;
@@ -95,6 +124,7 @@ function init() {
   statuses.forEach((status) => [$("status"), $("filter-status")].forEach((el) => el.add(new Option(status, status))));
   priorities.forEach((priority) => [$("priority"), $("filter-priority")].forEach((el) => el.add(new Option(priority, priority))));
   leadTypes.forEach((type) => [$("leadType"), $("filter-lead-type")].forEach((el) => el.add(new Option(type, type))));
+  CONTACT_METHODS.forEach((method) => $("lastContactMethod").add(new Option(method, method)));
   bindEvents();
   showAuthenticatedView();
 }
@@ -120,7 +150,7 @@ function showAuthenticatedView() {
   if (authed) render();
 }
 function getFormData() {
-  return { id: $("lead-id").value || crypto.randomUUID(), createdAt: $("lead-id").value ? leads.find((l) => l.id === $("lead-id").value)?.createdAt : new Date().toISOString(), name: $("name").value.trim(), phone: $("phone").value.trim(), email: $("email").value.trim(), location: $("location").value.trim(), referralSource: $("referralSource").value.trim(), condition: $("condition").value.trim(), status: $("status").value, priority: $("priority").value, leadType: $("leadType").value, nextFollowUp: $("nextFollowUp").value, notes: $("notes").value.trim() };
+  return { name: $("name").value.trim(), phone: $("phone").value.trim(), email: $("email").value.trim(), location: $("location").value.trim(), referralSource: $("referralSource").value.trim(), condition: $("condition").value.trim(), status: $("status").value, priority: $("priority").value, leadType: $("leadType").value, nextFollowUp: $("nextFollowUp").value, nextAction: $("nextAction").value.trim(), lastContactedAt: $("lastContactedAt").value, lastContactMethod: $("lastContactMethod").value, notes: $("notes").value.trim() };
 }
 function validateLead(lead) {
   if (!lead.name || !lead.phone || !lead.location || !lead.condition || !lead.status || !lead.priority || !lead.leadType) return "Please complete all required fields.";
@@ -130,19 +160,51 @@ function validateLead(lead) {
 }
 function handleSave(event) {
   event.preventDefault();
-  const lead = getFormData();
-  const error = validateLead(lead);
+  const fields = getFormData();
+  const error = validateLead(fields);
   if (error) { $("form-error").textContent = error; return; }
-  leads = leads.some((l) => l.id === lead.id) ? leads.map((l) => (l.id === lead.id ? lead : l)) : [lead, ...leads];
+  const existing = leads.find((lead) => lead.id === $("lead-id").value);
+  if (existing) {
+    const now = new Date().toISOString();
+    const activities = [...existing.activities];
+    if (existing.status !== fields.status) {
+      const specializedType = ({ [STATUSES.BOOKED]: ACTIVITY_TYPES.BOOKED, [STATUSES.COMPLETED]: ACTIVITY_TYPES.COMPLETED, [STATUSES.LOST]: ACTIVITY_TYPES.LOST })[fields.status];
+      activities.push(createActivity(existing.id, specializedType || ACTIVITY_TYPES.STATUS_CHANGED, now, "", `${existing.status} → ${fields.status}`));
+    }
+    if (existing.nextFollowUp !== fields.nextFollowUp) activities.push(createActivity(existing.id, ACTIVITY_TYPES.FOLLOW_UP_CHANGED, now, "", describeFollowUpChange(existing.nextFollowUp, fields.nextFollowUp)));
+    if (existing.lastContactedAt !== fields.lastContactedAt || existing.lastContactMethod !== fields.lastContactMethod) {
+      activities.push(createActivity(existing.id, ACTIVITY_TYPES.CONTACTED, fields.lastContactedAt ? new Date(fields.lastContactedAt).toISOString() : now, fields.lastContactMethod, "Contact details updated"));
+    }
+    const updated = { ...existing, ...fields, activities };
+    if (fields.status === STATUSES.BOOKED && !updated.bookedAt) updated.bookedAt = now;
+    leads = leads.map((lead) => lead.id === existing.id ? updated : lead);
+  } else {
+    const now = new Date().toISOString();
+    const id = crypto.randomUUID();
+    const lead = normalizeLead({ id, createdAt: now, ...fields, bookedAt: fields.status === STATUSES.BOOKED ? now : "", activities: [createActivity(id, ACTIVITY_TYPES.LEAD_CREATED, now)] });
+    leads = [lead, ...leads];
+  }
   saveLeads(); resetForm(); render();
 }
-function resetForm() { $("lead-form").reset(); $("lead-id").value = ""; $("form-title").textContent = "Add lead"; $("save-lead").textContent = "Save lead"; $("cancel-edit").classList.add("hidden"); $("form-error").textContent = ""; }
-function editLead(id) { const lead = leads.find((l) => l.id === id); Object.entries(lead).forEach(([key, value]) => { if ($(key)) $(key).value = value; }); $("lead-id").value = id; $("form-title").textContent = "Edit lead"; $("save-lead").textContent = "Update lead"; $("cancel-edit").classList.remove("hidden"); scrollTo({ top: 0, behavior: "smooth" }); }
+function createActivity(leadId, type, activityAt = new Date().toISOString(), contactMethod = "", note = "") {
+  return { id: crypto.randomUUID(), leadId, type, activityAt, contactMethod: CONTACT_METHODS.includes(contactMethod) ? contactMethod : "", note, createdAt: new Date().toISOString() };
+}
+function describeFollowUpChange(previous, next) { return `${previous || "No date"} → ${next || "No date"}`; }
+function resetForm() { $("lead-form").reset(); $("lead-id").value = ""; $("form-title").textContent = "Add lead"; $("save-lead").textContent = "Save lead"; $("cancel-edit").classList.add("hidden"); $("edit-history").classList.add("hidden"); $("form-error").textContent = ""; }
+function editLead(id) {
+  const lead = leads.find((l) => l.id === id);
+  Object.entries(lead).forEach(([key, value]) => { if ($(key) && !["lastContactedAt"].includes(key)) $(key).value = value; });
+  $("lastContactedAt").value = toDateTimeLocal(lead.lastContactedAt);
+  $("lead-id").value = id; $("form-title").textContent = "Edit lead"; $("save-lead").textContent = "Update lead"; $("cancel-edit").classList.remove("hidden");
+  $("edit-history").classList.remove("hidden"); $("edit-history").innerHTML = activityHistoryMarkup(lead);
+  scrollTo({ top: 0, behavior: "smooth" });
+}
+function toDateTimeLocal(value) { if (!value) return ""; const date = new Date(value); const offset = date.getTimezoneOffset() * 60000; return Number.isNaN(date.getTime()) ? "" : new Date(date - offset).toISOString().slice(0, 16); }
 function deleteLead(id) { if (confirm("Delete this lead?")) { leads = leads.filter((l) => l.id !== id); saveLeads(); render(); } }
 function getFilteredLeads() {
   const q = $("search").value.toLowerCase();
-  const fields = ["name", "phone", "email", "location", "condition", "notes"];
-  return leads.filter((lead) => fields.some((field) => lead[field].toLowerCase().includes(q)))
+  const fields = ["name", "phone", "email", "location", "condition", "notes", "nextAction"];
+  return leads.filter((lead) => fields.some((field) => String(lead[field] || "").toLowerCase().includes(q)))
     .filter((lead) => !$("filter-status").value || normalizeStatus(lead.status) === $("filter-status").value)
     .filter((lead) => !$("filter-referral").value || lead.referralSource === $("filter-referral").value)
     .filter((lead) => !$("filter-priority").value || lead.priority === $("filter-priority").value)
@@ -194,7 +256,13 @@ function renderDailyActions() {
 function renderLeads() {
   $("result-count").textContent = filteredLeads.length;
   $("empty-state").classList.toggle("hidden", filteredLeads.length > 0);
-  $("lead-list").innerHTML = filteredLeads.map((lead) => { const status = normalizeStatus(lead.status); const followUp = classifyFollowUp(lead.nextFollowUp); return `<article class="lead-card"><header><div><h3>${escapeHtml(lead.name)}</h3><p class="muted">${escapeHtml(lead.condition)}</p></div><span class="badge priority-pill priority-${lead.priority.toLowerCase()}">${lead.priority}</span></header><div class="badges"><span class="badge status-${status.toLowerCase().replace(/[^a-z0-9]+/g, "-")}">${escapeHtml(status)}</span><span class="badge type-${(lead.leadType || "New patient").toLowerCase().replace(/[^a-z0-9]+/g, "-")}">${escapeHtml(lead.leadType || "New patient")}</span>${lead.referralSource ? `<span class="badge referral-badge">${escapeHtml(lead.referralSource)}</span>` : ""}${followUpChip(followUp)}${followUp.exactDate ? `<span class="exact-date">${escapeHtml(followUp.exactDate)}</span>` : ""}</div><div class="card-grid"><span>☎ ${escapeHtml(lead.phone)}</span><span>✉ ${escapeHtml(lead.email || "No email")}</span><span>📍 ${escapeHtml(lead.location)}</span><span>Created ${new Date(lead.createdAt).toLocaleDateString()}</span></div>${lead.notes ? `<p>${escapeHtml(lead.notes)}</p>` : ""}<div class="card-actions"><button class="secondary" onclick="editLead('${lead.id}')">Edit</button><button class="ghost" onclick="deleteLead('${lead.id}')">Delete</button></div></article>`; }).join("");
+  $("lead-list").innerHTML = filteredLeads.map((lead) => { const status = normalizeStatus(lead.status); const followUp = classifyFollowUp(lead.nextFollowUp); return `<article class="lead-card"><header><div><h3>${escapeHtml(lead.name)}</h3><p class="muted">${escapeHtml(lead.condition)}</p></div><span class="badge priority-pill priority-${lead.priority.toLowerCase()}">${lead.priority}</span></header><div class="badges"><span class="badge status-${status.toLowerCase().replace(/[^a-z0-9]+/g, "-")}">${escapeHtml(status)}</span><span class="badge type-${(lead.leadType || "New patient").toLowerCase().replace(/[^a-z0-9]+/g, "-")}">${escapeHtml(lead.leadType || "New patient")}</span>${lead.referralSource ? `<span class="badge referral-badge">${escapeHtml(lead.referralSource)}</span>` : ""}${followUpChip(followUp)}${followUp.exactDate ? `<span class="exact-date">${escapeHtml(followUp.exactDate)}</span>` : ""}</div><div class="card-grid"><span>☎ ${escapeHtml(lead.phone)}</span><span>✉ ${escapeHtml(lead.email || "No email")}</span><span>📍 ${escapeHtml(lead.location)}</span><span>Created ${formatDateTime(lead.createdAt)}</span><span><strong>Next action:</strong> ${escapeHtml(lead.nextAction || "None set")}</span><span><strong>Last contact:</strong> ${lead.lastContactedAt ? `${formatDateTime(lead.lastContactedAt)}${lead.lastContactMethod ? ` · ${escapeHtml(lead.lastContactMethod)}` : ""}` : "Not recorded"}</span></div>${lead.notes ? `<p>${escapeHtml(lead.notes)}</p>` : ""}<details class="lead-details"><summary>Activity details</summary>${activityHistoryMarkup(lead)}</details><div class="card-actions"><button class="secondary" onclick="editLead('${lead.id}')">Edit</button><button class="ghost" onclick="deleteLead('${lead.id}')">Delete</button></div></article>`; }).join("");
+}
+function formatDateTime(value) { const date = new Date(value); return Number.isNaN(date.getTime()) ? "Unknown" : escapeHtml(date.toLocaleString()); }
+function activityHistoryMarkup(lead) {
+  const sorted = [...lead.activities].sort((a, b) => new Date(b.activityAt) - new Date(a.activityAt));
+  const items = (activities) => activities.length ? `<ol class="activity-list">${activities.map((activity) => `<li><strong>${escapeHtml(activity.type)}</strong><time datetime="${escapeHtml(activity.activityAt)}">${formatDateTime(activity.activityAt)}</time>${activity.contactMethod ? `<span>${escapeHtml(activity.contactMethod)}</span>` : ""}${activity.note ? `<p>${escapeHtml(activity.note)}</p>` : ""}</li>`).join("")}</ol>` : '<p class="muted">No activity recorded.</p>';
+  return `<section class="activity-history" aria-label="Activity history"><h4>Recent activity</h4>${items(sorted.slice(0, 3))}${sorted.length > 3 ? `<details><summary>View full history (${sorted.length})</summary>${items(sorted)}</details>` : ""}</section>`;
 }
 function clearFilters() { ["search", "filter-status", "filter-referral", "filter-priority", "filter-lead-type", "filter-followup"].forEach((id) => $(id).value = ""); $("sort-by").value = "newest"; render(); }
 function exportCsv(rows, filename) {
