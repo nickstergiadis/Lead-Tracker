@@ -6,7 +6,7 @@ A mobile-friendly lead/admin tracker for the Restore at Home mobile physiotherap
 
 The production application is a Vercel application backed by PostgreSQL. Authentication is checked by every create, read, update, delete, activity, import, and export route. The browser receives only an `HttpOnly`, `Secure`, `SameSite=Strict` signed session cookie; it does not decide whether a user is authorized. Passwords are represented only by a server-side scrypt hash.
 
-This is intentionally a minimal, single-owner authentication model. Use a managed identity provider before adding multiple users or roles. Do not enter treatment, assessment, clinical, or protected medical information.
+Accounts are isolated by UUID ownership enforced in every query. Registration requires a single-use, expiring invitation created by an authenticated administrator. Passwords use salted scrypt hashes; recovery codes contain 128 bits of entropy and only their keyed hashes are stored. Do not enter treatment, assessment, clinical, or protected medical information.
 
 Leads and activity history live in PostgreSQL. The schema indexes owner-scoped normalized status, follow-up date, normalized phone, and normalized email. Apply it before deployment:
 
@@ -19,13 +19,24 @@ psql "$DATABASE_URL" -f db/schema.sql
 1. Import the repository into Vercel and attach a managed PostgreSQL database.
 2. In **Project Settings → Environment Variables**, add the values shown in `.env.example`. These are server-only secrets and must not be exposed as public/client variables.
 3. Generate a session secret, for example with `openssl rand -base64 48`.
-4. Generate the password hash locally (replace the final argument with the desired password), then save the printed value as `AUTH_PASSWORD_HASH`:
+4. Apply `db/schema.sql`, temporarily set matching random `BOOTSTRAP_TOKEN` and `BOOTSTRAP_CONFIRM_TOKEN` values, and bootstrap the first administrator from a trusted terminal:
 
    ```bash
-   node -e 'const c=require("node:crypto"),s=c.randomBytes(16);console.log(`scrypt$${s.toString("base64url")}$${c.scryptSync(process.argv[1],s,32).toString("base64url")}`)' 'choose-a-long-unique-password'
+   node scripts/bootstrap-admin.mjs admin "Administrator" 'a-long-Unique-password!42'
    ```
 
-5. Apply `db/schema.sql` to the production database, then deploy. Vercel serves the static frontend and routes `/api/*` to the serverless API.
+5. Save the one-time recovery code offline, then immediately remove both bootstrap variables. Bootstrap refuses to run after a usable administrator exists. Sign in and create invitations from authenticated administrator tooling; invitation plaintext is returned only when created.
+6. Deploy. Vercel serves the static frontend and routes `/api/*` to the serverless API.
+
+## Migrating an existing installation
+
+Back up the database, then run `psql "$DATABASE_URL" -f db/migrations/001_multi_user.sql`. The transaction creates `legacy-admin`, assigns every legacy `primary` lead and activity to that UUID, aborts if any row has an unexpected owner, and only then installs foreign keys. Run the bootstrap command above immediately; it converts that placeholder into the first usable administrator without changing its UUID, preserving ownership.
+
+## Invitations, recovery, disablement, and lockout
+
+Administrators create short-lived invitations only through authenticated `/api/admin/invitations` routes. Codes are single-use and atomically consumed. Registration and recovery show a new recovery code exactly once with print/download controls; users must acknowledge saving it. Codes are never put in URLs or browser storage. Recovery consumes the old code, changes the password, increments the session version, and revokes every session. Security settings support password changes, recovery-code replacement, session review, and revoking other sessions.
+
+Disabling an account revokes all of its sessions. Server-side role checks protect administrator operations, and the final active administrator cannot disable itself. For total lockout, a database operator must verify identity and either re-enable an existing administrator or, only when no usable active administrator remains, reset the affected row to the documented `bootstrap-required` placeholder and run bootstrap from a trusted terminal. Rotate session, invitation, and recovery peppers after a suspected server-secret compromise; rotating them invalidates sessions and outstanding codes as applicable.
 
 For local development, copy `.env.example` to `.env.local`, supply real values, apply the schema, then run:
 

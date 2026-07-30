@@ -21,6 +21,7 @@ let activeMetricFilter = "";
 let saveInProgress = false;
 let pendingDuplicateSave = null;
 let storageRecoveryError = "";
+let currentUser = null;
 const $ = (id) => document.getElementById(id);
 
 function searchableText(lead) {
@@ -102,10 +103,26 @@ async function init() {
   CONTACT_METHODS.forEach((method) => $("lastContactMethod").add(new Option(method, method)));
   CONTACT_METHODS.forEach((method) => $("contact-method").add(new Option(method, method)));
   bindEvents();
-  try { await api("/session"); showAuthenticatedView(true); await refreshLeads(); } catch { showAuthenticatedView(false); }
+  try { const result = await api("/session"); currentUser = result.user; showAuthenticatedView(true); await refreshLeads(); } catch { showAuthenticatedView(false); }
 }
 function bindEvents() {
   $("login-form").addEventListener("submit", handleLogin);
+  $("show-register").addEventListener("click", () => showAuthPanel("register-view"));
+  $("show-recover").addEventListener("click", () => showAuthPanel("recover-view"));
+  document.querySelectorAll(".auth-back").forEach((button) => button.addEventListener("click", () => showAuthPanel("login-view")));
+  $("register-form").addEventListener("submit", handleRegister);
+  $("recover-form").addEventListener("submit", handleRecover);
+  $("recovery-saved").addEventListener("change", (event) => { $("finish-recovery").disabled = !event.target.checked; });
+  $("finish-recovery").addEventListener("click", finishRecovery);
+  $("print-recovery").addEventListener("click", () => window.print());
+  $("download-recovery").addEventListener("click", downloadRecoveryCode);
+  $("security-toggle").addEventListener("click", loadSecurity);
+  $("password-change-form").addEventListener("submit", changePassword);
+  $("recovery-regenerate-form").addEventListener("submit", regenerateRecoveryCode);
+  $("revoke-other-sessions").addEventListener("click", revokeOtherSessions);
+  $("invitation-form").addEventListener("submit", createInvitation);
+  $("invitation-list").addEventListener("click", revokeInvitation);
+  $("admin-user-list").addEventListener("click", disableUser);
   $("logout").addEventListener("click", async () => { await api("/logout", { method: "POST", body: "{}" }).catch(() => {}); showAuthenticatedView(false); });
   $("lead-form").addEventListener("submit", handleSave);
   $("add-lead-disclosure").addEventListener("click", toggleLeadForm);
@@ -136,15 +153,30 @@ function toggleLeadForm() {
 }
 async function handleLogin(event) {
   event.preventDefault();
-  try { await api("/login", { method: "POST", body: JSON.stringify({ password: $("password").value }) }); $("password").value = ""; showAuthenticatedView(true); await refreshLeads(); } catch { $("login-error").textContent = "Sign-in failed."; }
+  try { await api("/login", { method: "POST", body: JSON.stringify({ username: $("login-username").value, password: $("password").value }) }); currentUser = (await api("/session")).user; $("password").value = ""; showAuthenticatedView(true); await refreshLeads(); } catch { $("login-error").textContent = "Sign-in failed."; }
 }
+function showAuthPanel(id) { ["login-view", "register-view", "recover-view", "recovery-code-view"].forEach((view) => $(view).classList.toggle("hidden", view !== id)); }
+function showRecoveryCode(code, authenticated) { $("one-time-recovery-code").textContent = code; $("recovery-code-view").dataset.authenticated = String(authenticated); $("recovery-saved").checked = false; $("finish-recovery").disabled = true; showAuthPanel("recovery-code-view"); }
+async function handleRegister(event) { event.preventDefault(); $("register-error").textContent = ""; try { const result = await api("/register", { method: "POST", body: JSON.stringify({ invitationCode: $("register-invitation").value, username: $("register-username").value, displayName: $("register-display-name").value, password: $("register-password").value, passwordConfirmation: $("register-confirm").value }) }); $("register-form").reset(); showRecoveryCode(result.recoveryCode, true); } catch (error) { $("register-error").textContent = error.message; } }
+async function handleRecover(event) { event.preventDefault(); try { const result = await api("/recover", { method: "POST", body: JSON.stringify({ username: $("recover-username").value, recoveryCode: $("recover-code").value, newPassword: $("recover-password").value }) }); $("recover-form").reset(); showRecoveryCode(result.recoveryCode, false); } catch { $("recover-error").textContent = "Recovery failed. Check your details or try again later."; } }
+function downloadRecoveryCode() { const code = $("one-time-recovery-code").textContent; const blob = new Blob([`Restore at Home recovery code\n\n${code}\n\nStore this offline. It can be used only once.\n`], { type: "text/plain" }); const link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = "restore-at-home-recovery-code.txt"; link.click(); setTimeout(() => URL.revokeObjectURL(link.href), 0); }
+async function finishRecovery() { $("one-time-recovery-code").textContent = ""; if ($("recovery-code-view").dataset.authenticated === "true") { showAuthenticatedView(true); await refreshLeads(); } else showAuthPanel("login-view"); }
+async function loadSecurity(forceOpen = false) { $("security-view").classList.toggle("hidden", forceOpen ? false : !$("security-view").classList.contains("hidden")); if ($("security-view").classList.contains("hidden")) return; const result = await api("/security/sessions"); $("session-list").innerHTML = result.sessions.map((session) => `<p>${escapeHtml(session.user_agent || "Unknown device")} — ${session.current ? "current" : "active"}</p>`).join(""); }
+async function changePassword(event) { event.preventDefault(); try { await api("/security/password", { method: "POST", body: JSON.stringify({ currentPassword: $("current-password").value, newPassword: $("new-password").value }) }); event.target.reset(); $("security-message").textContent = "Password changed."; } catch { $("security-message").textContent = "Password change failed."; } }
+async function regenerateRecoveryCode(event) { event.preventDefault(); try { const result = await api("/security/recovery-code", { method: "POST", body: JSON.stringify({ currentPassword: $("recovery-current-password").value }) }); event.target.reset(); showRecoveryCode(result.recoveryCode, true); } catch { $("security-message").textContent = "Recovery code regeneration failed."; } }
+async function revokeOtherSessions() { await api("/security/sessions/others", { method: "DELETE" }); $("security-message").textContent = "Other sessions revoked."; await loadSecurity(true); }
+async function loadAdmin() { if (currentUser?.role !== "admin") return; const [invitations, users] = await Promise.all([api("/admin/invitations"), api("/admin/users")]); $("admin-view").classList.remove("hidden"); $("invitation-list").innerHTML = invitations.invitations.map((item) => `<p>${new Date(item.expires_at).toLocaleString()} — ${item.consumed_at ? "used" : item.revoked_at ? "revoked" : `<button class="secondary" data-invitation-id="${item.id}">Revoke</button>`}</p>`).join(""); $("admin-user-list").innerHTML = users.users.map((item) => `<p>${escapeHtml(item.display_name)} (${escapeHtml(item.username_normalized)}) — ${item.role}, ${item.status} ${item.status === "active" ? `<button class="secondary" data-user-id="${item.id}">Disable</button>` : ""}</p>`).join(""); }
+async function createInvitation(event) { event.preventDefault(); const result = await api("/admin/invitations", { method: "POST", body: JSON.stringify({ expiresInHours: $("invitation-hours").value }) }); $("new-invitation-code").textContent = `Copy this invitation now: ${result.invitation.code}`; await loadAdmin(); }
+async function revokeInvitation(event) { const id = event.target.dataset.invitationId; if (!id) return; await api(`/admin/invitations/${id}`, { method: "DELETE" }); await loadAdmin(); }
+async function disableUser(event) { const id = event.target.dataset.userId; if (!id || !confirm("Disable this account and revoke all sessions?")) return; try { await api(`/admin/users/${id}/disable`, { method: "POST", body: "{}" }); await loadAdmin(); } catch (error) { $("admin-message").textContent = error.message; } }
 function showAuthenticatedView(authed) {
-  $("login-view").classList.toggle("hidden", authed);
+  if (!authed) showAuthPanel("login-view"); else ["login-view", "register-view", "recover-view", "recovery-code-view"].forEach((id) => $(id).classList.add("hidden"));
   $("app-view").classList.toggle("hidden", !authed);
   if (authed) {
     render();
     $("import-browser").classList.toggle("hidden", !localStorage.getItem(STORAGE_KEY));
     if (storageRecoveryError) announce(storageRecoveryError);
+    loadAdmin().catch(() => { $("admin-view").classList.add("hidden"); });
   }
 }
 function getFormData() {
