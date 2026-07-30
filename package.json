@@ -1,9 +1,18 @@
 {
   "name": "restore-at-home-lead-tracker",
   "private": true,
+  "engines": {
+    "node": ">=20 <25"
+  },
   "scripts": {
     "test": "node --test",
+    "lint": "eslint app.js api business test scripts eslint.config.mjs",
+    "check": "for file in app.js api/index.js business/*.mjs scripts/*.mjs; do node --check \"$file\" || exit; done",
+    "build": "node scripts/build.mjs",
     "start": "vercel dev"
+  },
+  "devDependencies": {
+    "eslint": "^9.32.0"
   },
   "dependencies": {
     "pg": "^8.16.3"

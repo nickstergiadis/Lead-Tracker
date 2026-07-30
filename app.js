@@ -1,18 +1,11 @@
+import { STATUS_VALUES as statuses, STATUS_MIGRATIONS, normalizeStatus } from "./business/status.mjs";
+import { classifyFollowUp, formatLocalCalendarDate } from "./business/follow-up.mjs";
+import { calculateMetrics, isOpenLead } from "./business/metrics.mjs";
+import { normalizeEmailForMatch, normalizePhoneForMatch, phonesMatch } from "./business/duplicates.mjs";
+import { ACTIVITY_TYPES } from "./business/activity.mjs";
+import { serializeLeadsToCsv } from "./business/csv.mjs";
+
 const STORAGE_KEY = "restoreAtHomeLeads";
-const STATUSES = Object.freeze({
-  NEW_INQUIRY: "New inquiry",
-  CONTACTED: "Contacted",
-  WAITING_FOR_REPLY: "Waiting for reply",
-  BOOKED: "Booked",
-  COMPLETED: "Completed",
-  LOST: "Lost"
-});
-const statuses = Object.freeze(Object.values(STATUSES));
-const STATUS_MIGRATIONS = Object.freeze({
-  New: STATUSES.NEW_INQUIRY,
-  "Follow-up needed": STATUSES.WAITING_FOR_REPLY,
-  "Not a fit": STATUSES.LOST
-});
 const priorities = ["Low", "Medium", "High"];
 const PRIORITY_RANK = Object.freeze({ High: 0, Medium: 1, Low: 2 });
 const MISSING_DATE_RANK = Number.POSITIVE_INFINITY;
@@ -20,15 +13,6 @@ const DEFAULT_SORT = "newest";
 const SEARCH_FIELDS = Object.freeze(["name", "phone", "email", "location", "condition", "referralSource", "notes", "nextAction"]);
 const leadTypes = ["New patient", "Returning patient"];
 const CONTACT_METHODS = Object.freeze(["Phone", "Email", "Text", "In person", "Other"]);
-const ACTIVITY_TYPES = Object.freeze({
-  LEAD_CREATED: "Lead created",
-  STATUS_CHANGED: "Status changed",
-  FOLLOW_UP_CHANGED: "Follow-up changed",
-  CONTACTED: "Contacted",
-  BOOKED: "Booked",
-  COMPLETED: "Completed",
-  LOST: "Lost"
-});
 const activityTypes = Object.freeze(Object.values(ACTIVITY_TYPES));
 let leads = [];
 let filteredLeads = [];
@@ -39,44 +23,6 @@ let pendingDuplicateSave = null;
 let storageRecoveryError = "";
 const $ = (id) => document.getElementById(id);
 
-function normalizeStatus(value) {
-  if (statuses.includes(value)) return value;
-  return Object.hasOwn(STATUS_MIGRATIONS, value) ? STATUS_MIGRATIONS[value] : STATUSES.NEW_INQUIRY;
-}
-const CSV_COLUMNS = Object.freeze([
-  ["Name", "name"],
-  ["Phone", "phone"],
-  ["Email", "email"],
-  ["Location", "location"],
-  ["Condition", "condition"],
-  ["Notes", "notes"],
-  ["Status", (lead) => normalizeStatus(lead.status)],
-  ["Priority", "priority"],
-  ["Lead type", "leadType"],
-  ["Referral source", "referralSource"],
-  ["Next action", "nextAction"],
-  ["Follow-up date (YYYY-MM-DD)", "nextFollowUp"],
-  ["Last contacted date/time (ISO 8601)", (lead) => toIso8601(lead.lastContactedAt)],
-  ["Last contact method", "lastContactMethod"],
-  ["Booked date/time (ISO 8601)", (lead) => toIso8601(lead.bookedAt)],
-  ["Created date/time (ISO 8601)", (lead) => toIso8601(lead.createdAt)]
-]);
-function toIso8601(value) {
-  if (value === undefined || value === null || String(value).trim() === "") return "";
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? "" : date.toISOString();
-}
-function serializeLeadsToCsv(records, { includeBom = true } = {}) {
-  const escapeCell = (value) => `"${String(value ?? "").replace(/"/g, '""')}"`;
-  const rows = [
-    CSV_COLUMNS.map(([heading]) => heading),
-    ...records.map((lead) => CSV_COLUMNS.map(([, accessor]) => typeof accessor === "function" ? accessor(lead) : lead[accessor]))
-  ];
-  return `${includeBom ? "\uFEFF" : ""}${rows.map((row) => row.map(escapeCell).join(",")).join("\n")}`;
-}
-function isOpenLead(lead) {
-  return ![STATUSES.COMPLETED, STATUSES.LOST].includes(lead._status || normalizeStatus(lead.status));
-}
 function searchableText(lead) {
   return SEARCH_FIELDS.map((field) => String(lead[field] || "").toLocaleLowerCase()).join(" ");
 }
@@ -124,37 +70,6 @@ function loadLegacyLeads() {
 }
 async function api(path, options = {}) { const response = await fetch(`/api${path}`, { credentials: "same-origin", headers: { "Content-Type": "application/json", ...(options.headers || {}) }, ...options }); if (response.status === 401) { showAuthenticatedView(false); throw new Error("Authentication required"); } const body = await response.json().catch(() => ({})); if (!response.ok) throw Object.assign(new Error(body.error || "Request failed"), { fields: body.fields }); return body; }
 async function refreshLeads() { const result = await api("/leads"); leads = result.leads.map(normalizeLead); render(); }
-function localDateParts(date = new Date()) {
-  return { year: date.getFullYear(), month: date.getMonth() + 1, day: date.getDate() };
-}
-function formatLocalCalendarDate(date = new Date()) {
-  const { year, month, day } = localDateParts(date);
-  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-}
-function parseCalendarDate(value) {
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value || "");
-  if (!match) return null;
-  const [, year, month, day] = match.map(Number);
-  const date = new Date(year, month - 1, day);
-  if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) return null;
-  return { year, month, day, date };
-}
-function calendarDayNumber({ year, month, day }) { return Math.floor(Date.UTC(year, month - 1, day) / 86400000); }
-function classifyFollowUp(value, now = new Date()) {
-  const followUp = parseCalendarDate(value);
-  if (!followUp) return { state: "none", dayDifference: null, relativeLabel: "No follow-up date", exactDate: "" };
-  const dayDifference = calendarDayNumber(followUp) - calendarDayNumber(localDateParts(now));
-  const state = dayDifference < 0 ? "overdue" : dayDifference === 0 ? "today" : "future";
-  const relativeLabel = dayDifference < -1 ? `${Math.abs(dayDifference)} days overdue`
-    : dayDifference === -1 ? "1 day overdue"
-      : dayDifference === 0 ? "Follow up today"
-        : dayDifference === 1 ? "Tomorrow" : `In ${dayDifference} days`;
-  const exactDate = followUp.date.toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" });
-  return { state, dayDifference, relativeLabel, exactDate };
-}
-function isRealTimestamp(value) {
-  return typeof value === "string" && value.trim() !== "" && !Number.isNaN(new Date(value).getTime());
-}
 function timestampRank(value) {
   const timestamp = new Date(String(value || "")).getTime();
   return Number.isNaN(timestamp) ? MISSING_DATE_RANK : timestamp;
@@ -175,44 +90,7 @@ function prepareLead(lead, now = new Date()) {
     _priorityRank: PRIORITY_RANK[lead.priority] ?? Object.keys(PRIORITY_RANK).length
   };
 }
-function calculateMetrics(records, now = new Date()) {
-  const todayOrOverdue = (lead) => isOpenLead(lead) && ["today", "overdue"].includes(lead._followUp.state);
-  const overdue = (lead) => isOpenLead(lead) && lead._followUp.state === "overdue";
-  const bookedThisMonth = (lead) => {
-    if (!isRealTimestamp(lead.bookedAt)) return false;
-    const booked = new Date(lead.bookedAt);
-    return booked.getFullYear() === now.getFullYear() && booked.getMonth() === now.getMonth();
-  };
-  const hasTrackedLoss = (lead) => lead.activities.some((activity) => activity.type === ACTIVITY_TYPES.LOST && isRealTimestamp(activity.activityAt));
-  // Qualified outcomes are reconstructable closed-funnel events: a real bookedAt or a tracked Lost activity.
-  const qualified = (lead) => isRealTimestamp(lead.bookedAt) || hasTrackedLoss(lead);
-  const booked = records.filter((lead) => isRealTimestamp(lead.bookedAt)).length;
-  const qualifiedCount = records.filter(qualified).length;
-  return {
-    open: records.filter(isOpenLead).length,
-    needsAction: records.filter(todayOrOverdue).length,
-    overdue: records.filter(overdue).length,
-    bookedThisMonth: records.filter(bookedThisMonth).length,
-    conversionRate: qualifiedCount ? (booked / qualifiedCount) * 100 : 0,
-    qualifiedCount,
-    predicates: { open: isOpenLead, "needs-action": todayOrOverdue, overdue, "booked-month": bookedThisMonth, conversion: qualified }
-  };
-}
 function escapeHtml(value = "") { return String(value).replace(/[&<>'"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" }[c])); }
-function normalizePhoneForMatch(phone) { return String(phone || "").replace(/\D/g, ""); }
-function normalizeEmailForMatch(email) { return String(email || "").trim().toLocaleLowerCase(); }
-function phonesMatch(first, second) {
-  const a = normalizePhoneForMatch(first);
-  const b = normalizePhoneForMatch(second);
-  if (!a || !b) return false;
-  if (a === b) return true;
-  // Only compare a national significant number when the country code is explicit and
-  // unambiguous: +1 plus ten NANP digits versus those same ten digits. We deliberately
-  // do not strip arbitrary country codes because the stored records have no country metadata.
-  const explicitNanp = (value, digits) => String(value || "").trim().startsWith("+1") && digits.length === 11;
-  return explicitNanp(first, a) && b.length === 10 && a.slice(1) === b
-    || explicitNanp(second, b) && a.length === 10 && b.slice(1) === a;
-}
 function normalizePhone(phone) { return normalizePhoneForMatch(phone); }
 function isValidPhone(phone) { return /^\d{7,15}$/.test(normalizePhoneForMatch(phone)); }
 function isValidEmail(email) { return !email || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email); }
@@ -311,7 +189,7 @@ async function persistLead({ fields, existingId }) {
     resetForm();
     render();
     announce(`${fields.name} ${existing ? "updated" : "created"} successfully.`);
-  } catch (error) {
+  } catch {
     console.error("Unable to save lead changes.");
     $("form-error").textContent = "The lead could not be saved. Your entries have been preserved; try again.";
     announce("Lead could not be saved. Your entries have been preserved.");
@@ -321,10 +199,6 @@ async function persistLead({ fields, existingId }) {
     $("save-anyway").disabled = false;
   }
 }
-function createActivity(leadId, type, activityAt = new Date().toISOString(), contactMethod = "", note = "") {
-  return { id: crypto.randomUUID(), leadId, type, activityAt, contactMethod: CONTACT_METHODS.includes(contactMethod) ? contactMethod : "", note, createdAt: new Date().toISOString() };
-}
-function describeFollowUpChange(previous, next) { return `${previous || "No date"} → ${next || "No date"}`; }
 function showValidationErrors(errors = {}) {
   ["name", "phone", "email", "location", "condition", "status", "priority", "leadType"].forEach((field) => {
     $(`${field}-error`).textContent = errors[field] || "";
@@ -376,7 +250,6 @@ function handleLeadListClick(event) {
   handlers[action.dataset.action]?.();
 }
 function toggleCardDetails(card, button) {
-  const details = card.querySelector(".lead-card-details");
   const expanded = button.getAttribute("aria-expanded") === "true";
   button.setAttribute("aria-expanded", String(!expanded));
   card.classList.toggle("is-expanded", !expanded);
@@ -572,4 +445,3 @@ async function importBrowserRecords() {
   } catch (error) { announce(error.message || "Import failed; browser data was not changed."); }
 }
 if (typeof document !== "undefined") init();
-if (typeof module !== "undefined" && module.exports) module.exports = { normalizeStatus, serializeLeadsToCsv };
