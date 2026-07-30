@@ -2,6 +2,10 @@
   "name": "restore-at-home-lead-tracker",
   "private": true,
   "scripts": {
-    "test": "node --test"
+    "test": "node --test",
+    "start": "vercel dev"
+  },
+  "dependencies": {
+    "pg": "^8.16.3"
   }
 }

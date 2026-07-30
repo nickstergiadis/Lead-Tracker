@@ -1,52 +1,49 @@
 # Restore at Home Lead Tracker
 
-A simple, mobile-friendly lead/admin tracker for the Restore at Home mobile physiotherapy clinic. It is intentionally scoped to lead management only and is **not** a clinical charting or medical record system.
+A mobile-friendly lead/admin tracker for the Restore at Home mobile physiotherapy clinic. It is **not** a clinical chart or medical-record system.
 
-## Features
+## Security and data model
 
-- Add, edit, and delete leads
-- Track name, phone, email, location, referral source, new/returning lead type, condition/reason for inquiry, status, priority, next follow-up date, and notes
-- Search by name, phone, email, location, condition, referral source, notes, or next action
-- Filter by status, referral source, priority, new/returning lead type, and next follow-up date
-- Sort by newest, oldest, follow-up soonest, most overdue, highest priority, or name
-- Actionable dashboard metrics for open leads, follow-ups needing action, overdue follow-ups, monthly bookings, and tracked-history conversion
-- Export all leads or the currently filtered list to CSV
-- Required-field validation plus basic email and phone formatting checks
-- Sample demo data included on first load
-- Lightweight demo login gate
+The production application is a Vercel application backed by PostgreSQL. Authentication is checked by every create, read, update, delete, activity, import, and export route. The browser receives only an `HttpOnly`, `Secure`, `SameSite=Strict` signed session cookie; it does not decide whether a user is authorized. Passwords are represented only by a server-side scrypt hash.
 
-## Setup and run
+This is intentionally a minimal, single-owner authentication model. Use a managed identity provider before adding multiple users or roles. Do not enter treatment, assessment, clinical, or protected medical information.
 
-No build step is required.
+Leads and activity history live in PostgreSQL. The schema indexes owner-scoped normalized status, follow-up date, normalized phone, and normalized email. Apply it before deployment:
 
-1. Clone or download this repository.
-2. Open `index.html` directly in a browser, or serve the folder with any static file server:
+```bash
+psql "$DATABASE_URL" -f db/schema.sql
+```
+
+## Deploy to Vercel
+
+1. Import the repository into Vercel and attach a managed PostgreSQL database.
+2. In **Project Settings → Environment Variables**, add the values shown in `.env.example`. These are server-only secrets and must not be exposed as public/client variables.
+3. Generate a session secret, for example with `openssl rand -base64 48`.
+4. Generate the password hash locally (replace the final argument with the desired password), then save the printed value as `AUTH_PASSWORD_HASH`:
 
    ```bash
-   python3 -m http.server 4173
+   node -e 'const c=require("node:crypto"),s=c.randomBytes(16);console.log(`scrypt$${s.toString("base64url")}$${c.scryptSync(process.argv[1],s,32).toString("base64url")}`)' 'choose-a-long-unique-password'
    ```
 
-3. Visit `http://localhost:4173`.
-4. Log in with the demo password:
+5. Apply `db/schema.sql` to the production database, then deploy. Vercel serves the static frontend and routes `/api/*` to the serverless API.
 
-   ```text
-   restore-demo
-   ```
+For local development, copy `.env.example` to `.env.local`, supply real values, apply the schema, then run:
 
-## Data storage
+```bash
+npm install
+npx vercel dev
+```
 
-Leads are stored in the browser's `localStorage` under the key `restoreAtHomeLeads`. This makes the app easy to run as an MVP, but data stays on the device/browser where it was entered.
+## Browser-data import
 
-## Privacy note
-
-This app is for lead/admin tracking only. Do not use it to document treatment, assessments, clinical notes, or protected medical records. The included static password is a convenience gate for demos and should be replaced with real authentication before production use.
+Earlier versions stored leads under `restoreAtHomeLeads` in browser `localStorage`. The app never uploads those records automatically. After signing in, **Import browser backup** performs an authenticated server preview showing total, valid, and invalid counts. Import requires explicit confirmation and first downloads a dated JSON backup. The original browser value is retained after import. Resolve invalid records before importing; the import endpoint rejects partial/invalid batches.
 
 ## CSV export
 
-Use **Export all CSV** to download every saved lead. Use **Export filtered CSV** after applying search or filters to download only the visible result set.
+**Export all CSV** downloads server data through an authenticated export endpoint. **Export filtered CSV** serializes the already-authorized records currently loaded into the signed-in view.
 
-## Customizing
+## Tests
 
-- Change the demo password in `app.js` by updating `DEMO_PASSWORD`.
-- Edit the sample leads in `app.js` in the `demoLeads` array.
-- Update brand colors, badge colors, and layout in `styles.css`.
+```bash
+npm test
+```
