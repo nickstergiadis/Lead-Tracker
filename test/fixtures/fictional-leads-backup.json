@@ -1,0 +1,23 @@
+{
+  "format": "restore-at-home-leads",
+  "version": 1,
+  "exportedAt": "2026-07-31T18:00:00.000Z",
+  "leads": [
+    {
+      "id": "lead-amina-rivera", "name": "Amina Rivera", "phone": "3035550101", "email": "amina.rivera@example.test", "location": "Denver, CO", "referralSource": "Community event", "condition": "Mobility consultation", "status": "New inquiry", "priority": "High", "leadType": "New patient", "nextFollowUp": "2026-08-01", "nextAction": "Call to confirm preferred appointment window", "lastContactedAt": "2026-07-31T15:30:00.000Z", "lastContactMethod": "Phone", "bookedAt": "", "notes": "Prefers calls after 3 PM; fictional test record.", "createdAt": "2026-07-29T14:00:00.000Z", "updatedAt": "2026-07-31T15:31:00.000Z",
+      "activities": [{ "id": "activity-amina-1", "leadId": "lead-amina-rivera", "type": "Contacted", "activityAt": "2026-07-31T15:30:00.000Z", "contactMethod": "Phone", "note": "Left a fictional callback message.", "createdAt": "2026-07-31T15:31:00.000Z" }]
+    },
+    {
+      "id": "lead-theo-bennett", "name": "Theo Bennett", "phone": "7205550102", "email": "theo.bennett@example.test", "location": "Aurora, CO", "referralSource": "Website", "condition": "Return visit inquiry", "status": "Contacted", "priority": "Medium", "leadType": "Returning patient", "nextFollowUp": "2026-08-04", "nextAction": "Email the fictional availability summary", "lastContactedAt": "2026-07-30T17:00:00.000Z", "lastContactMethod": "Email", "bookedAt": "", "notes": "Asked for weekday options; fictional test record.", "createdAt": "2026-07-28T12:00:00.000Z", "updatedAt": "2026-07-30T17:05:00.000Z",
+      "activities": [{ "id": "activity-theo-1", "leadId": "lead-theo-bennett", "type": "Contacted", "activityAt": "2026-07-30T17:00:00.000Z", "contactMethod": "Email", "note": "Sent fictional introduction.", "createdAt": "2026-07-30T17:05:00.000Z" }]
+    },
+    {
+      "id": "lead-jun-park", "name": "Jun Park", "phone": "9705550103", "email": "jun.park@example.test", "location": "Boulder, CO", "referralSource": "Friend referral", "condition": "Initial service inquiry", "status": "Booked", "priority": "Low", "leadType": "New patient", "nextFollowUp": "2026-08-07", "nextAction": "Send fictional appointment reminder", "lastContactedAt": "2026-07-31T16:00:00.000Z", "lastContactMethod": "Text", "bookedAt": "2026-07-31T16:05:00.000Z", "notes": "Booking is fictional and used only for import testing.", "createdAt": "2026-07-27T10:00:00.000Z", "updatedAt": "2026-07-31T16:05:00.000Z",
+      "activities": [{ "id": "activity-jun-1", "leadId": "lead-jun-park", "type": "Contacted", "activityAt": "2026-07-31T16:00:00.000Z", "contactMethod": "Text", "note": "Confirmed fictional time.", "createdAt": "2026-07-31T16:00:00.000Z" }, { "id": "activity-jun-2", "leadId": "lead-jun-park", "type": "Status changed", "activityAt": "2026-07-31T16:05:00.000Z", "contactMethod": "", "note": "Status changed to Booked", "createdAt": "2026-07-31T16:05:00.000Z" }]
+    },
+    {
+      "id": "lead-marta-silva", "name": "Marta Silva", "phone": "7195550104", "email": "", "location": "Lakewood, CO", "referralSource": "Directory", "condition": "General information request", "status": "Lost", "priority": "Medium", "leadType": "New patient", "nextFollowUp": "", "nextAction": "No action planned", "lastContactedAt": "2026-07-26T19:00:00.000Z", "lastContactMethod": "In person", "bookedAt": "", "notes": "Chose another fictional provider.", "createdAt": "2026-07-25T11:00:00.000Z", "updatedAt": "2026-07-26T19:10:00.000Z",
+      "activities": [{ "id": "activity-marta-1", "leadId": "lead-marta-silva", "type": "Lost", "activityAt": "2026-07-26T19:10:00.000Z", "contactMethod": "In person", "note": "Closed fictional inquiry.", "createdAt": "2026-07-26T19:10:00.000Z" }]
+    }
+  ]
+}
