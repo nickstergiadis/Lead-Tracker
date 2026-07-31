@@ -90,25 +90,27 @@
                 <p id="result-summary" class="muted" aria-live="polite" aria-atomic="true"><span id="result-count">0</span> leads showing</p>
               </div>
             </div>
-            <div class="filter-heading">
-              <h3>Filters <span id="active-filter-count" class="filter-count hidden" aria-label="active filters">0</span></h3>
-            </div>
-            <div class="filters">
-              <label class="filter-control search-control"><span class="sr-only">Search leads</span><input id="search" type="search" placeholder="Search name, phone, email, location, condition, referral source, next action, notes" /></label>
-              <label class="filter-control"><span class="sr-only">Filter by status</span><select id="filter-status"><option value="">All statuses</option></select></label>
-              <label class="filter-control"><span class="sr-only">Filter by referral source</span><select id="filter-referral"><option value="">All referral sources</option></select></label>
-              <label class="filter-control"><span class="sr-only">Filter by priority</span><select id="filter-priority"><option value="">All priorities</option></select></label>
-              <label class="filter-control"><span class="sr-only">Filter by lead type</span><select id="filter-lead-type"><option value="">New or returning</option></select></label>
-              <label class="filter-control"><span class="sr-only">Filter by next follow-up date</span><input id="filter-followup" type="date" /></label>
-              <label class="filter-control"><span class="sr-only">Sort leads</span><select id="sort-by">
-                <option value="newest">Newest</option>
-                <option value="oldest">Oldest</option>
-                <option value="followup-soonest">Follow-up soonest</option>
-                <option value="most-overdue">Most overdue</option>
-                <option value="highest-priority">Highest priority</option>
-                <option value="name">Name A–Z</option>
-              </select></label>
-              <button id="clear-filters" type="button" class="ghost">Clear</button>
+            <div class="filter-toolbar">
+              <div class="filter-heading">
+                <h3>Filters <span id="active-filter-count" class="filter-count hidden" aria-label="active filters">0</span></h3>
+              </div>
+              <div class="filters">
+                <label class="filter-control search-control"><span class="sr-only">Search leads</span><input id="search" type="search" placeholder="Search name, phone, email, location, condition, referral source, next action, notes" /></label>
+                <label class="filter-control"><span class="sr-only">Filter by status</span><select id="filter-status"><option value="">All statuses</option></select></label>
+                <label class="filter-control"><span class="sr-only">Filter by referral source</span><select id="filter-referral"><option value="">All referral sources</option></select></label>
+                <label class="filter-control"><span class="sr-only">Filter by priority</span><select id="filter-priority"><option value="">All priorities</option></select></label>
+                <label class="filter-control"><span class="sr-only">Filter by lead type</span><select id="filter-lead-type"><option value="">New or returning</option></select></label>
+                <label class="filter-control"><span class="sr-only">Filter by next follow-up date</span><input id="filter-followup" type="date" /></label>
+                <label class="filter-control"><span class="sr-only">Sort leads</span><select id="sort-by">
+                  <option value="newest">Newest</option>
+                  <option value="oldest">Oldest</option>
+                  <option value="followup-soonest">Follow-up soonest</option>
+                  <option value="most-overdue">Most overdue</option>
+                  <option value="highest-priority">Highest priority</option>
+                  <option value="name">Name A–Z</option>
+                </select></label>
+                <button id="clear-filters" type="button" class="ghost">Clear</button>
+              </div>
             </div>
             <div id="empty-state" class="empty hidden">No leads match your current filters.</div>
             <div id="lead-list" class="lead-list"></div>
