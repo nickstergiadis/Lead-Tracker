@@ -4,6 +4,7 @@ import { calculateMetrics, isOpenLead } from "./business/metrics.mjs";
 import { normalizeEmailForMatch, normalizePhoneForMatch, phonesMatch } from "./business/duplicates.mjs";
 import { ACTIVITY_TYPES, buildAutomaticActivities } from "./business/activity.mjs";
 import { serializeLeadsToCsv } from "./business/csv.mjs";
+import { CONTACT_METHODS, normalizeContactMethod, normalizeLeadContactMethods } from "./business/contact-method.mjs";
 
 const STORAGE_KEY = "restoreAtHomeLeads";
 const BACKUP_VERSION = 1;
@@ -13,7 +14,6 @@ const MISSING_DATE_RANK = Number.POSITIVE_INFINITY;
 const DEFAULT_SORT = "newest";
 const SEARCH_FIELDS = Object.freeze(["name", "phone", "email", "location", "condition", "referralSource", "notes", "nextAction"]);
 const leadTypes = ["New patient", "Returning patient"];
-const CONTACT_METHODS = Object.freeze(["Phone", "Email", "Text", "In person", "Other"]);
 const activityTypes = Object.freeze(Object.values(ACTIVITY_TYPES));
 let leads = [];
 let filteredLeads = [];
@@ -41,10 +41,10 @@ function normalizeLead(rawLead) {
     if (!activity || typeof activity !== "object" || Array.isArray(activity) || !activityTypes.includes(activity.type)) throw new TypeError("A lead has an invalid activity");
     const activityAt = new Date(activity.activityAt);
     if (Number.isNaN(activityAt.getTime())) throw new TypeError("A lead has an invalid activity date");
-    return { id: String(activity.id || crypto.randomUUID()), leadId: String(activity.leadId || rawLead.id), type: activity.type, activityAt: activityAt.toISOString(), contactMethod: CONTACT_METHODS.includes(activity.contactMethod) ? activity.contactMethod : "", note: typeof activity.note === "string" ? activity.note : "", createdAt: activity.createdAt || activityAt.toISOString() };
+    return { id: String(activity.id || crypto.randomUUID()), leadId: String(activity.leadId || rawLead.id), type: activity.type, activityAt: activityAt.toISOString(), contactMethod: normalizeContactMethod(activity.contactMethod), note: typeof activity.note === "string" ? activity.note : "", createdAt: activity.createdAt || activityAt.toISOString() };
   }) : [];
   const createdAt = rawLead.createdAt || new Date().toISOString();
-  const normalizedLead = { ...rawLead, id: rawLead.id || crypto.randomUUID(), createdAt, updatedAt: rawLead.updatedAt || createdAt, status: normalizedStatus, email: typeof rawLead.email === "string" ? rawLead.email : "", referralSource: typeof rawLead.referralSource === "string" ? rawLead.referralSource : "", nextFollowUp: typeof rawLead.nextFollowUp === "string" ? rawLead.nextFollowUp : "", nextAction: typeof rawLead.nextAction === "string" ? rawLead.nextAction : "", lastContactedAt: typeof rawLead.lastContactedAt === "string" ? rawLead.lastContactedAt : "", lastContactMethod: CONTACT_METHODS.includes(rawLead.lastContactMethod) ? rawLead.lastContactMethod : "", bookedAt: typeof rawLead.bookedAt === "string" ? rawLead.bookedAt : "", notes: typeof rawLead.notes === "string" ? rawLead.notes : "", activities };
+  const normalizedLead = { ...rawLead, id: rawLead.id || crypto.randomUUID(), createdAt, updatedAt: rawLead.updatedAt || createdAt, status: normalizedStatus, email: typeof rawLead.email === "string" ? rawLead.email : "", referralSource: typeof rawLead.referralSource === "string" ? rawLead.referralSource : "", nextFollowUp: typeof rawLead.nextFollowUp === "string" ? rawLead.nextFollowUp : "", nextAction: typeof rawLead.nextAction === "string" ? rawLead.nextAction : "", lastContactedAt: typeof rawLead.lastContactedAt === "string" ? rawLead.lastContactedAt : "", lastContactMethod: normalizeContactMethod(rawLead.lastContactMethod), bookedAt: typeof rawLead.bookedAt === "string" ? rawLead.bookedAt : "", notes: typeof rawLead.notes === "string" ? rawLead.notes : "", activities };
   if (normalizedStatus !== originalStatus) normalizedLead.legacyStatus = originalStatus;
   return normalizedLead;
 }
@@ -400,7 +400,7 @@ function exportCsv(rows, filename) {
   link.click(); URL.revokeObjectURL(url);
 }
 function downloadJson(value, filename) { const url = URL.createObjectURL(new Blob([JSON.stringify(value, null, 2)], { type: "application/json" })); Object.assign(document.createElement("a"), { href: url, download: filename }).click(); URL.revokeObjectURL(url); }
-function exportJson() { downloadJson({ format: "restore-at-home-leads", version: BACKUP_VERSION, exportedAt: new Date().toISOString(), leads }, `restore-at-home-leads-${formatLocalCalendarDate()}.json`); announce(`${leads.length} leads exported to JSON.`); }
+function exportJson() { downloadJson({ format: "restore-at-home-leads", version: BACKUP_VERSION, exportedAt: new Date().toISOString(), leads: leads.map(normalizeLeadContactMethods) }, `restore-at-home-leads-${formatLocalCalendarDate()}.json`); announce(`${leads.length} leads exported to JSON.`); }
 async function importJson(event) {
   const file = event.target.files?.[0]; event.target.value = ""; if (!file) return;
   try {

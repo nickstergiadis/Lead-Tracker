@@ -6,6 +6,7 @@ import { calculateMetrics } from "../business/metrics.mjs";
 import { leadsMatch, normalizeEmailForMatch, normalizePhoneForMatch, phonesMatch } from "../business/duplicates.mjs";
 import { ACTIVITY_TYPES, buildAutomaticActivities } from "../business/activity.mjs";
 import { serializeLeadsToCsv } from "../business/csv.mjs";
+import { CONTACT_METHODS, normalizeContactMethod, normalizeLeadContactMethods } from "../business/contact-method.mjs";
 
 test("normalizes every known legacy status and safely defaults unknown values", () => {
   assert.equal(normalizeStatus("New"), STATUSES.NEW_INQUIRY);
@@ -67,6 +68,27 @@ test("serializes absent fields, legacy statuses, timestamps, and spreadsheet BOM
   assert.ok(csv.startsWith("\uFEFF"));
   assert.match(csv, /"Legacy lead","","","","","","New inquiry"/);
   assert.ok(csv.includes('"2026-07-29T08:00:00.000Z"'));
+});
+
+test("normalizes legacy contact methods in CSV exports", () => {
+  const csv = serializeLeadsToCsv([{ name: "Legacy lead", lastContactMethod: "Phone" }], { includeBom: false });
+  const dataRow = csv.split("\n")[1];
+  assert.ok(dataRow.includes('"Phone call"'));
+  assert.ok(!dataRow.includes('"Phone"'));
+});
+
+test("defines current contact methods and normalizes legacy JSON backup values", () => {
+  assert.deepEqual(CONTACT_METHODS, ["Phone call", "Voicemail", "Email", "Text message", "Other"]);
+  assert.equal(normalizeContactMethod("Phone"), "Phone call");
+  assert.equal(normalizeContactMethod("Text"), "Text message");
+  assert.equal(normalizeContactMethod("In person"), "Other");
+
+  const exported = normalizeLeadContactMethods({
+    lastContactMethod: "Text",
+    activities: [{ contactMethod: "Phone" }]
+  });
+  assert.equal(exported.lastContactMethod, "Text message");
+  assert.equal(exported.activities[0].contactMethod, "Phone call");
 });
 
 test("CSV escaping quotes commas and preserves embedded CR/LF", () => {
