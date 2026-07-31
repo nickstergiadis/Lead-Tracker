@@ -2,10 +2,11 @@ import { STATUS_VALUES as statuses, STATUS_MIGRATIONS, normalizeStatus } from ".
 import { classifyFollowUp, formatLocalCalendarDate } from "./business/follow-up.mjs";
 import { calculateMetrics, isOpenLead } from "./business/metrics.mjs";
 import { normalizeEmailForMatch, normalizePhoneForMatch, phonesMatch } from "./business/duplicates.mjs";
-import { ACTIVITY_TYPES } from "./business/activity.mjs";
+import { ACTIVITY_TYPES, buildAutomaticActivities } from "./business/activity.mjs";
 import { serializeLeadsToCsv } from "./business/csv.mjs";
 
 const STORAGE_KEY = "restoreAtHomeLeads";
+const BACKUP_VERSION = 1;
 const priorities = ["Low", "Medium", "High"];
 const PRIORITY_RANK = Object.freeze({ High: 0, Medium: 1, Low: 2 });
 const MISSING_DATE_RANK = Number.POSITIVE_INFINITY;
@@ -21,110 +22,67 @@ let activeMetricFilter = "";
 let saveInProgress = false;
 let pendingDuplicateSave = null;
 let storageRecoveryError = "";
-let currentUser = null;
 const $ = (id) => document.getElementById(id);
 
-function searchableText(lead) {
-  return SEARCH_FIELDS.map((field) => String(lead[field] || "").toLocaleLowerCase()).join(" ");
-}
+function searchableText(lead) { return SEARCH_FIELDS.map((field) => String(lead[field] || "").toLocaleLowerCase()).join(" "); }
 function normalizeLead(rawLead) {
   if (!rawLead || typeof rawLead !== "object" || Array.isArray(rawLead)) throw new TypeError("Invalid lead record");
+  const requiredStrings = ["name", "phone", "location", "condition", "priority", "leadType"];
+  if (requiredStrings.some((field) => typeof rawLead[field] !== "string" || !rawLead[field].trim())) throw new TypeError("A lead is missing required fields");
+  if (!priorities.includes(rawLead.priority) || !leadTypes.includes(rawLead.leadType)) throw new TypeError("A lead has an invalid priority or type");
+  if (!statuses.includes(rawLead.status) && !Object.hasOwn(STATUS_MIGRATIONS, rawLead.status)) throw new TypeError("A lead has an invalid status");
+  if (!isValidPhone(rawLead.phone) || !isValidEmail(rawLead.email || "")) throw new TypeError("A lead has invalid contact details");
+  if ([rawLead.createdAt, rawLead.updatedAt].some((value) => value && Number.isNaN(new Date(value).getTime()))) throw new TypeError("A lead has an invalid timestamp");
+  if (rawLead.nextFollowUp && classifyFollowUp(rawLead.nextFollowUp).state === "none") throw new TypeError("A lead has an invalid follow-up date");
+  if ([rawLead.lastContactedAt, rawLead.bookedAt].some((value) => value && Number.isNaN(new Date(value).getTime()))) throw new TypeError("A lead has an invalid contact or booking date");
   const originalStatus = rawLead.status;
   const normalizedStatus = normalizeStatus(originalStatus);
-  const activities = Array.isArray(rawLead.activities)
-    ? rawLead.activities.filter((activity) => activity && typeof activity === "object").map((activity) => ({
-      id: activity.id || crypto.randomUUID(),
-      leadId: activity.leadId || rawLead.id,
-      type: activityTypes.includes(activity.type) ? activity.type : ACTIVITY_TYPES.STATUS_CHANGED,
-      activityAt: activity.activityAt || activity.createdAt || rawLead.createdAt || new Date().toISOString(),
-      contactMethod: CONTACT_METHODS.includes(activity.contactMethod) ? activity.contactMethod : "",
-      note: typeof activity.note === "string" ? activity.note : "",
-      createdAt: activity.createdAt || new Date().toISOString()
-    })) : [];
-  const normalizedLead = {
-    ...rawLead,
-    status: normalizedStatus,
-    nextAction: typeof rawLead.nextAction === "string" ? rawLead.nextAction : "",
-    lastContactedAt: typeof rawLead.lastContactedAt === "string" ? rawLead.lastContactedAt : "",
-    lastContactMethod: CONTACT_METHODS.includes(rawLead.lastContactMethod) ? rawLead.lastContactMethod : "",
-    bookedAt: typeof rawLead.bookedAt === "string" ? rawLead.bookedAt : "",
-    activities
-  };
-  // Preserve unknown legacy statuses so a migration can revisit them without data loss.
-  if (normalizedStatus !== originalStatus && !Object.hasOwn(STATUS_MIGRATIONS, originalStatus)) normalizedLead.legacyStatus = originalStatus;
+  const activities = Array.isArray(rawLead.activities) ? rawLead.activities.map((activity) => {
+    if (!activity || typeof activity !== "object" || Array.isArray(activity) || !activityTypes.includes(activity.type)) throw new TypeError("A lead has an invalid activity");
+    const activityAt = new Date(activity.activityAt);
+    if (Number.isNaN(activityAt.getTime())) throw new TypeError("A lead has an invalid activity date");
+    return { id: String(activity.id || crypto.randomUUID()), leadId: String(activity.leadId || rawLead.id), type: activity.type, activityAt: activityAt.toISOString(), contactMethod: CONTACT_METHODS.includes(activity.contactMethod) ? activity.contactMethod : "", note: typeof activity.note === "string" ? activity.note : "", createdAt: activity.createdAt || activityAt.toISOString() };
+  }) : [];
+  const createdAt = rawLead.createdAt || new Date().toISOString();
+  const normalizedLead = { ...rawLead, id: rawLead.id || crypto.randomUUID(), createdAt, updatedAt: rawLead.updatedAt || createdAt, status: normalizedStatus, email: typeof rawLead.email === "string" ? rawLead.email : "", referralSource: typeof rawLead.referralSource === "string" ? rawLead.referralSource : "", nextFollowUp: typeof rawLead.nextFollowUp === "string" ? rawLead.nextFollowUp : "", nextAction: typeof rawLead.nextAction === "string" ? rawLead.nextAction : "", lastContactedAt: typeof rawLead.lastContactedAt === "string" ? rawLead.lastContactedAt : "", lastContactMethod: CONTACT_METHODS.includes(rawLead.lastContactMethod) ? rawLead.lastContactMethod : "", bookedAt: typeof rawLead.bookedAt === "string" ? rawLead.bookedAt : "", notes: typeof rawLead.notes === "string" ? rawLead.notes : "", activities };
+  if (normalizedStatus !== originalStatus) normalizedLead.legacyStatus = originalStatus;
   return normalizedLead;
 }
-function loadLegacyLeads() {
+function loadLeads() {
   try {
     const saved = localStorage.getItem(STORAGE_KEY);
-    // A missing key is first use. An empty or otherwise invalid stored value is
-    // persisted data that needs recovery and must not be replaced with examples.
     if (saved === null) return [];
     const parsed = JSON.parse(saved);
     if (!Array.isArray(parsed)) throw new TypeError("Stored leads must be an array");
     return parsed.map(normalizeLead);
   } catch {
-    storageRecoveryError = "Saved lead data could not be loaded. The stored data was left unchanged; recover or clear it before saving.";
+    storageRecoveryError = "Saved lead data could not be loaded. It was left unchanged; import a valid backup or clear browser storage before saving.";
     console.error("Saved lead data could not be loaded; storage was left unchanged.");
     return [];
   }
 }
-async function api(path, options = {}, { preserveAuthView = false } = {}) { const response = await fetch(`/api${path}`, { credentials: "same-origin", headers: { "Content-Type": "application/json", ...(options.headers || {}) }, ...options }); if (response.status === 401 && !preserveAuthView) { showAuthenticatedView(false); throw new Error("Authentication required"); } const body = await response.json().catch(() => ({})); if (!response.ok) throw Object.assign(new Error(body.error || `Request failed (${response.status})`), { fields: body.fields, status: response.status }); return body; }
-async function refreshLeads() { const result = await api("/leads"); leads = result.leads.map(normalizeLead); render(); }
-function timestampRank(value) {
-  const timestamp = new Date(String(value || "")).getTime();
-  return Number.isNaN(timestamp) ? MISSING_DATE_RANK : timestamp;
+function saveLeads() {
+  if (storageRecoveryError) throw new Error(storageRecoveryError);
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(leads));
 }
-function compareDateRanks(a, b, direction = 1) {
-  const aMissing = a === MISSING_DATE_RANK;
-  const bMissing = b === MISSING_DATE_RANK;
-  if (aMissing || bMissing) return aMissing === bMissing ? 0 : aMissing ? 1 : -1;
-  return (a - b) * direction;
-}
-function prepareLead(lead, now = new Date()) {
-  return {
-    ...lead,
-    _searchableText: searchableText(lead),
-    _status: normalizeStatus(lead.status),
-    _followUp: classifyFollowUp(lead.nextFollowUp, now),
-    _createdTime: timestampRank(lead.createdAt),
-    _priorityRank: PRIORITY_RANK[lead.priority] ?? Object.keys(PRIORITY_RANK).length
-  };
-}
+function refreshLeads() { leads = loadLeads(); render(); }
+function timestampRank(value) { const timestamp = new Date(String(value || "")).getTime(); return Number.isNaN(timestamp) ? MISSING_DATE_RANK : timestamp; }
+function compareDateRanks(a, b, direction = 1) { const aMissing = a === MISSING_DATE_RANK; const bMissing = b === MISSING_DATE_RANK; if (aMissing || bMissing) return aMissing === bMissing ? 0 : aMissing ? 1 : -1; return (a - b) * direction; }
+function prepareLead(lead, now = new Date()) { return { ...lead, _searchableText: searchableText(lead), _status: normalizeStatus(lead.status), _followUp: classifyFollowUp(lead.nextFollowUp, now), _createdTime: timestampRank(lead.createdAt), _priorityRank: PRIORITY_RANK[lead.priority] ?? Object.keys(PRIORITY_RANK).length }; }
 function escapeHtml(value = "") { return String(value).replace(/[&<>'"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" }[c])); }
 function normalizePhone(phone) { return normalizePhoneForMatch(phone); }
 function isValidPhone(phone) { return /^\d{7,15}$/.test(normalizePhoneForMatch(phone)); }
 function isValidEmail(email) { return !email || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email); }
-
-async function init() {
+function init() {
   statuses.forEach((status) => [$("status"), $("filter-status")].forEach((el) => el.add(new Option(status, status))));
   priorities.forEach((priority) => [$("priority"), $("filter-priority")].forEach((el) => el.add(new Option(priority, priority))));
   leadTypes.forEach((type) => [$("leadType"), $("filter-lead-type")].forEach((el) => el.add(new Option(type, type))));
   CONTACT_METHODS.forEach((method) => $("lastContactMethod").add(new Option(method, method)));
   CONTACT_METHODS.forEach((method) => $("contact-method").add(new Option(method, method)));
-  bindEvents();
-  try { const result = await api("/session"); currentUser = result.user; showAuthenticatedView(true); await refreshLeads(); } catch { showAuthenticatedView(false); }
+  bindEvents(); refreshLeads();
+  if (storageRecoveryError) announce(storageRecoveryError);
 }
 function bindEvents() {
-  $("login-form").addEventListener("submit", handleLogin);
-  bindAuthNavigation("show-register", "register-view");
-  bindAuthNavigation("show-recover", "recover-view");
-  bindAuthNavigation("register-back", "login-view");
-  bindAuthNavigation("recover-back", "login-view");
-  bindAuthSubmit("register-form", handleRegister);
-  bindAuthSubmit("recover-form", handleRecover);
-  $("recovery-saved").addEventListener("change", (event) => { $("finish-recovery").disabled = !event.target.checked; });
-  $("finish-recovery").addEventListener("click", finishRecovery);
-  $("print-recovery").addEventListener("click", () => window.print());
-  $("download-recovery").addEventListener("click", downloadRecoveryCode);
-  $("security-toggle").addEventListener("click", loadSecurity);
-  $("password-change-form").addEventListener("submit", changePassword);
-  $("recovery-regenerate-form").addEventListener("submit", regenerateRecoveryCode);
-  $("revoke-other-sessions").addEventListener("click", revokeOtherSessions);
-  $("invitation-form").addEventListener("submit", createInvitation);
-  $("invitation-list").addEventListener("click", revokeInvitation);
-  $("admin-user-list").addEventListener("click", disableUser);
-  $("logout").addEventListener("click", async () => { await api("/logout", { method: "POST", body: "{}" }).catch(() => {}); showAuthenticatedView(false); });
   $("lead-form").addEventListener("submit", handleSave);
   $("add-lead-disclosure").addEventListener("click", toggleLeadForm);
   $("lead-form").addEventListener("input", clearDuplicateWarning);
@@ -134,89 +92,19 @@ function bindEvents() {
   ["search", "filter-status", "filter-referral", "filter-priority", "filter-lead-type", "filter-followup", "sort-by"].forEach((id) => $(id).addEventListener("input", render));
   $("clear-filters").addEventListener("click", clearFilters);
   document.querySelector(".dashboard").addEventListener("click", handleMetricFilter);
-  $("export-all").addEventListener("click", () => exportServerCsv());
+  $("export-all").addEventListener("click", () => exportCsv(leads, "restore-at-home-all-leads.csv"));
   $("export-filtered").addEventListener("click", () => exportCsv(filteredLeads, "restore-at-home-filtered-leads.csv"));
-  $("import-browser").addEventListener("click", importBrowserRecords);
+  $("export-json").addEventListener("click", exportJson);
+  $("import-json").addEventListener("click", () => $("import-file").click());
+  $("import-file").addEventListener("change", importJson);
   $("lead-list").addEventListener("click", handleLeadListClick);
   $("contact-form").addEventListener("submit", handleContactSave);
   $("contact-dialog").addEventListener("keydown", trapDialogFocus);
   $("contact-dialog").addEventListener("close", restoreContactDialogFocus);
   document.querySelectorAll("[data-dialog-close]").forEach((button) => button.addEventListener("click", closeContactDialog));
-  document.addEventListener("click", closeOpenMenus);
-  document.addEventListener("keydown", handleGlobalKeydown);
+  document.addEventListener("click", closeOpenMenus); document.addEventListener("keydown", handleGlobalKeydown);
 }
-function authSetupError(message) {
-  const error = $("login-error");
-  if (error) error.textContent = message;
-  else console.error(message);
-}
-function bindAuthNavigation(controlId, viewId) {
-  const control = $(controlId);
-  if (!control) { authSetupError(`Authentication control #${controlId} is unavailable.`); return; }
-  control.addEventListener("click", () => {
-    if (!$(viewId)) { authSetupError(`The requested authentication form (#${viewId}) is unavailable.`); return; }
-    showAuthPanel(viewId);
-  });
-}
-function bindAuthSubmit(formId, handler) {
-  const form = $(formId);
-  if (!form) { authSetupError(`Authentication form #${formId} is unavailable.`); return; }
-  form.addEventListener("submit", handler);
-}
-function toggleLeadForm() {
-  const button = $("add-lead-disclosure");
-  const opening = button.getAttribute("aria-expanded") !== "true";
-  button.setAttribute("aria-expanded", String(opening));
-  $("lead-form").classList.toggle("is-open", opening);
-  if (opening) $("name").focus();
-}
-async function handleLogin(event) {
-  event.preventDefault();
-  try { await api("/login", { method: "POST", body: JSON.stringify({ username: $("login-username").value, password: $("password").value }) }); currentUser = (await api("/session")).user; $("password").value = ""; showAuthenticatedView(true); await refreshLeads(); } catch { $("login-error").textContent = "Sign-in failed."; }
-}
-const AUTH_VIEWS = Object.freeze(["login-view", "register-view", "recover-view", "recovery-code-view"]);
-const AUTH_ERRORS = Object.freeze(["login-error", "register-error", "recover-error"]);
-const SENSITIVE_AUTH_FIELDS = Object.freeze({ "login-view": ["password"], "register-view": ["register-invitation", "register-password", "register-confirm"], "recover-view": ["recover-code", "recover-password"], "recovery-code-view": ["one-time-recovery-code"] });
-const AUTH_FOCUS = Object.freeze({ "login-view": "login-username", "register-view": "register-invitation", "recover-view": "recover-username", "recovery-code-view": "one-time-recovery-code" });
-function showAuthPanel(id) {
-  if (!AUTH_VIEWS.includes(id) || !$(id)) { authSetupError(`The requested authentication form (#${id}) is unavailable.`); return false; }
-  for (const viewId of AUTH_VIEWS) {
-    const view = $(viewId);
-    if (!view) { authSetupError(`Authentication view #${viewId} is unavailable.`); continue; }
-    const active = viewId === id;
-    view.classList.toggle("hidden", !active);
-    view.setAttribute("aria-hidden", String(!active));
-    if (!active) for (const fieldId of SENSITIVE_AUTH_FIELDS[viewId] || []) { const field = $(fieldId); if (field) field.value = ""; }
-  }
-  for (const errorId of AUTH_ERRORS) { const error = $(errorId); if (error) error.textContent = ""; }
-  const focusTarget = $(AUTH_FOCUS[id]);
-  if (focusTarget) focusTarget.focus();
-  else authSetupError(`The first field for #${id} is unavailable.`);
-  return true;
-}
-function showRecoveryCode(code, authenticated) { $("one-time-recovery-code").textContent = code; $("recovery-code-view").dataset.authenticated = String(authenticated); $("recovery-saved").checked = false; $("finish-recovery").disabled = true; showAuthPanel("recovery-code-view"); }
-async function handleRegister(event) { event.preventDefault(); const form = event.currentTarget; $("register-error").textContent = ""; if (!form.checkValidity()) { form.reportValidity(); $("register-error").textContent = "Complete every registration field using the requested format."; return; } if ($("register-password").value !== $("register-confirm").value) { $("register-error").textContent = "Passwords must match."; $("register-confirm").focus(); return; } try { const result = await api("/register", { method: "POST", body: JSON.stringify({ invitationCode: $("register-invitation").value, username: $("register-username").value, displayName: $("register-display-name").value, password: $("register-password").value, passwordConfirmation: $("register-confirm").value }) }, { preserveAuthView: true }); if (!result.recoveryCode) throw new Error("Registration succeeded without a recovery code. Contact an administrator before continuing."); form.reset(); showRecoveryCode(result.recoveryCode, true); } catch (error) { $("register-error").textContent = error.message || "Registration failed. Try again later."; } }
-async function handleRecover(event) { event.preventDefault(); const form = event.currentTarget; $("recover-error").textContent = ""; if (!form.checkValidity()) { form.reportValidity(); $("recover-error").textContent = "Complete every recovery field using the requested format."; return; } try { const result = await api("/recover-account", { method: "POST", body: JSON.stringify({ username: $("recover-username").value, recoveryCode: $("recover-code").value, newPassword: $("recover-password").value }) }, { preserveAuthView: true }); if (!result.recoveryCode) throw new Error("Recovery succeeded without a replacement recovery code. Contact an administrator before continuing."); form.reset(); showRecoveryCode(result.recoveryCode, false); } catch (error) { $("recover-error").textContent = error.message || "Recovery failed. Check your details or try again later."; } }
-function downloadRecoveryCode() { const code = $("one-time-recovery-code").textContent; const blob = new Blob([`Restore at Home recovery code\n\n${code}\n\nStore this offline. It can be used only once.\n`], { type: "text/plain" }); const link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = "restore-at-home-recovery-code.txt"; link.click(); setTimeout(() => URL.revokeObjectURL(link.href), 0); }
-async function finishRecovery() { $("one-time-recovery-code").textContent = ""; if ($("recovery-code-view").dataset.authenticated === "true") { showAuthenticatedView(true); await refreshLeads(); } else showAuthPanel("login-view"); }
-async function loadSecurity(forceOpen = false) { $("security-view").classList.toggle("hidden", forceOpen ? false : !$("security-view").classList.contains("hidden")); if ($("security-view").classList.contains("hidden")) return; const result = await api("/security/sessions"); $("session-list").innerHTML = result.sessions.map((session) => `<p>${escapeHtml(session.user_agent || "Unknown device")} — ${session.current ? "current" : "active"}</p>`).join(""); }
-async function changePassword(event) { event.preventDefault(); try { await api("/security/password", { method: "POST", body: JSON.stringify({ currentPassword: $("current-password").value, newPassword: $("new-password").value }) }); event.target.reset(); $("security-message").textContent = "Password changed."; } catch { $("security-message").textContent = "Password change failed."; } }
-async function regenerateRecoveryCode(event) { event.preventDefault(); try { const result = await api("/security/recovery-code", { method: "POST", body: JSON.stringify({ currentPassword: $("recovery-current-password").value }) }); event.target.reset(); showRecoveryCode(result.recoveryCode, true); } catch { $("security-message").textContent = "Recovery code regeneration failed."; } }
-async function revokeOtherSessions() { await api("/security/sessions/others", { method: "DELETE" }); $("security-message").textContent = "Other sessions revoked."; await loadSecurity(true); }
-async function loadAdmin() { if (currentUser?.role !== "admin") return; const [invitations, users] = await Promise.all([api("/admin/invitations"), api("/admin/users")]); $("admin-view").classList.remove("hidden"); $("invitation-list").innerHTML = invitations.invitations.map((item) => `<p>${new Date(item.expires_at).toLocaleString()} — ${item.consumed_at ? "used" : item.revoked_at ? "revoked" : `<button class="secondary" data-invitation-id="${item.id}">Revoke</button>`}</p>`).join(""); $("admin-user-list").innerHTML = users.users.map((item) => `<p>${escapeHtml(item.display_name)} (${escapeHtml(item.username_normalized)}) — ${item.role}, ${item.status} ${item.status === "active" ? `<button class="secondary" data-user-id="${item.id}">Disable</button>` : ""}</p>`).join(""); }
-async function createInvitation(event) { event.preventDefault(); const result = await api("/admin/invitations", { method: "POST", body: JSON.stringify({ expiresInHours: $("invitation-hours").value }) }); $("new-invitation-code").textContent = `Copy this invitation now: ${result.invitation.code}`; await loadAdmin(); }
-async function revokeInvitation(event) { const id = event.target.dataset.invitationId; if (!id) return; await api(`/admin/invitations/${id}`, { method: "DELETE" }); await loadAdmin(); }
-async function disableUser(event) { const id = event.target.dataset.userId; if (!id || !confirm("Disable this account and revoke all sessions?")) return; try { await api(`/admin/users/${id}/disable`, { method: "POST", body: "{}" }); await loadAdmin(); } catch (error) { $("admin-message").textContent = error.message; } }
-function showAuthenticatedView(authed) {
-  if (!authed) showAuthPanel("login-view"); else AUTH_VIEWS.forEach((id) => { $(id).classList.add("hidden"); $(id).setAttribute("aria-hidden", "true"); });
-  $("app-view").classList.toggle("hidden", !authed);
-  if (authed) {
-    render();
-    $("import-browser").classList.toggle("hidden", !localStorage.getItem(STORAGE_KEY));
-    if (storageRecoveryError) announce(storageRecoveryError);
-    loadAdmin().catch(() => { $("admin-view").classList.add("hidden"); });
-  }
-}
+function toggleLeadForm() { const button = $("add-lead-disclosure"); const opening = button.getAttribute("aria-expanded") !== "true"; button.setAttribute("aria-expanded", String(opening)); $("lead-form").classList.toggle("is-open", opening); if (opening) $("name").focus(); }
 function getFormData() {
   return { name: $("name").value.trim(), phone: $("phone").value.trim(), email: $("email").value.trim(), location: $("location").value.trim(), referralSource: $("referralSource").value.trim(), condition: $("condition").value.trim(), status: $("status").value, priority: $("priority").value, leadType: $("leadType").value, nextFollowUp: $("nextFollowUp").value, nextAction: $("nextAction").value.trim(), lastContactedAt: $("lastContactedAt").value, lastContactMethod: $("lastContactMethod").value, notes: $("notes").value.trim() };
 }
@@ -247,15 +135,19 @@ function handleSave(event) {
   }
   persistLead({ fields, existingId: currentId });
 }
-async function persistLead({ fields, existingId }) {
+function persistLead({ fields, existingId }) {
   if (saveInProgress) return;
   saveInProgress = true;
   $("save-lead").disabled = true;
   $("save-anyway").disabled = true;
   try {
     const existing = leads.find((lead) => lead.id === existingId);
-    await api(existing ? `/leads/${existing.id}` : "/leads", { method: existing ? "PUT" : "POST", body: JSON.stringify(fields) });
-    await refreshLeads();
+    const now = new Date().toISOString();
+    const next = { ...fields, id: existing?.id || crypto.randomUUID(), createdAt: existing?.createdAt || now, updatedAt: now, bookedAt: fields.status === "Booked" ? existing?.bookedAt || now : existing?.bookedAt || "", activities: existing?.activities || [] };
+    next.activities = [...next.activities, ...buildAutomaticActivities(existing || null, next, { id: () => crypto.randomUUID(), now })];
+    if (existing) leads = leads.map((lead) => lead.id === existing.id ? next : lead);
+    else leads = [next, ...leads];
+    saveLeads();
     resetForm();
     render();
     announce(`${fields.name} ${existing ? "updated" : "created"} successfully.`);
@@ -300,9 +192,9 @@ function editLead(id) {
   scrollTo({ top: 0, behavior: "smooth" });
 }
 function toDateTimeLocal(value) { if (!value) return ""; const date = new Date(value); const offset = date.getTimezoneOffset() * 60000; return Number.isNaN(date.getTime()) ? "" : new Date(date - offset).toISOString().slice(0, 16); }
-async function deleteLead(id) {
+function deleteLead(id) {
   if (!confirm("Delete this lead?")) return;
-  try { await api(`/leads/${id}`, { method: "DELETE" }); await refreshLeads(); announce("Lead deleted successfully."); } catch { announce("The lead could not be deleted. Try again."); }
+  try { leads = leads.filter((lead) => lead.id !== id); saveLeads(); render(); announce("Lead deleted successfully."); } catch { announce("The lead could not be deleted. Try again."); }
 }
 function handleLeadListClick(event) {
   const action = event.target.closest("[data-action]");
@@ -374,7 +266,7 @@ function trapDialogFocus(event) {
   if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
   else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
 }
-async function handleContactSave(event) {
+function handleContactSave(event) {
   event.preventDefault();
   const id = $("contact-lead-id").value;
   const method = $("contact-method").value;
@@ -388,7 +280,11 @@ async function handleContactSave(event) {
   const existing = leads.find((lead) => lead.id === id);
   if (!existing) { $("contact-error").textContent = "This lead is no longer available."; return; }
   const contactedAt = contactedDate.toISOString();
-  try { await api(`/leads/${id}/activity`, { method: "POST", body: JSON.stringify({ activityAt: contactedAt, contactMethod: method, note }) }); await refreshLeads(); } catch { $("contact-error").textContent = "Contact activity could not be saved. Try again."; return; }
+  try {
+    const activity = { id: crypto.randomUUID(), leadId: id, type: ACTIVITY_TYPES.CONTACTED, activityAt: contactedAt, contactMethod: method, note, createdAt: new Date().toISOString() };
+    leads = leads.map((lead) => lead.id === id ? { ...lead, lastContactedAt: contactedAt, lastContactMethod: method, updatedAt: new Date().toISOString(), activities: [...lead.activities, activity] } : lead);
+    saveLeads();
+  } catch { $("contact-error").textContent = "Contact activity could not be saved. Try again."; return; }
   closeContactDialog();
   render();
   announce(`${existing.name} marked contacted.`);
@@ -500,20 +396,21 @@ function exportCsv(rows, filename) {
   const link = Object.assign(document.createElement("a"), { href: url, download: filename });
   link.click(); URL.revokeObjectURL(url);
 }
-async function exportServerCsv() { const response=await fetch("/api/export",{credentials:"same-origin"}); if(response.status===401){showAuthenticatedView(false);return;} if(!response.ok){announce("Export failed.");return;} const blob=await response.blob(),url=URL.createObjectURL(blob),link=Object.assign(document.createElement("a"),{href:url,download:"restore-at-home-all-leads.csv"});link.click();URL.revokeObjectURL(url); }
-async function importBrowserRecords() {
-  const records = loadLegacyLeads();
-  if (storageRecoveryError) { announce(storageRecoveryError); return; }
+function downloadJson(value, filename) { const url = URL.createObjectURL(new Blob([JSON.stringify(value, null, 2)], { type: "application/json" })); Object.assign(document.createElement("a"), { href: url, download: filename }).click(); URL.revokeObjectURL(url); }
+function exportJson() { downloadJson({ format: "restore-at-home-leads", version: BACKUP_VERSION, exportedAt: new Date().toISOString(), leads }, `restore-at-home-leads-${formatLocalCalendarDate()}.json`); announce(`${leads.length} leads exported to JSON.`); }
+async function importJson(event) {
+  const file = event.target.files?.[0]; event.target.value = ""; if (!file) return;
   try {
-    const preview = await api("/import/preview", { method: "POST", body: JSON.stringify({ leads: records }) });
-    if (!confirm(`Browser backup preview: ${preview.total} records (${preview.valid} valid, ${preview.invalid} invalid). Import valid data only if every record is valid? A JSON backup will download first; browser data will remain unchanged.`)) return;
-    if (preview.invalid) { announce("Import cancelled. Correct invalid browser records first."); return; }
-    const backup = new Blob([JSON.stringify(records, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(backup); Object.assign(document.createElement("a"), { href: url, download: `restore-at-home-browser-backup-${formatLocalCalendarDate()}.json` }).click(); URL.revokeObjectURL(url);
-    const result = await api("/import", { method: "POST", body: JSON.stringify({ leads: records }) });
-    await refreshLeads(); announce(`${result.imported} browser records imported. The original browser backup was preserved.`);
-  } catch (error) { announce(error.message || "Import failed; browser data was not changed."); }
+    const parsed = JSON.parse(await file.text());
+    if (!parsed || parsed.format !== "restore-at-home-leads" || parsed.version !== BACKUP_VERSION || !Array.isArray(parsed.leads)) throw new TypeError("This is not a supported Restore at Home backup.");
+    const imported = parsed.leads.map(normalizeLead);
+    if (new Set(imported.map((lead) => lead.id)).size !== imported.length) throw new TypeError("The backup contains duplicate lead IDs.");
+    const replace = confirm(`Validated ${imported.length} lead records. Select OK to replace current data, or Cancel to merge them with the current ${leads.length} records.`);
+    const next = replace ? imported : [...new Map([...leads, ...imported].map((lead) => [lead.id, lead])).values()];
+    if (!confirm(`${replace ? "Replace" : "Merge"} browser data with ${next.length} validated records? This cannot be undone unless you exported a backup.`)) return;
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(next)); storageRecoveryError = ""; leads = next; render(); announce(`${imported.length} leads imported successfully.`);
+  } catch (error) { announce(`Import rejected: ${error.message || "invalid JSON"} Existing data was not changed.`); }
 }
 if (typeof document !== "undefined") init();
 
-export { api, bindAuthNavigation, handleRecover, handleRegister, showAuthPanel };
+export { normalizeLead };
