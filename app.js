@@ -1,5 +1,5 @@
 import { STATUS_VALUES as statuses, STATUS_MIGRATIONS, normalizeStatus } from "./business/status.mjs";
-import { classifyFollowUp, formatLocalCalendarDate } from "./business/follow-up.mjs";
+import { classifyFollowUp, compareFollowUpSoonest, compareMostOverdue, formatLocalCalendarDate, formatRelativeContact } from "./business/follow-up.mjs";
 import { calculateMetrics, isOpenLead } from "./business/metrics.mjs";
 import { normalizeEmailForMatch, normalizePhoneForMatch, phonesMatch } from "./business/duplicates.mjs";
 import { ACTIVITY_TYPES, buildAutomaticActivities } from "./business/activity.mjs";
@@ -100,7 +100,8 @@ function bindEvents() {
   $("export-json").addEventListener("click", exportJson);
   $("import-json").addEventListener("click", () => $("import-file").click());
   $("import-file").addEventListener("change", importJson);
-  $("lead-list").addEventListener("click", handleLeadListClick);
+  $("lead-list").addEventListener("click", handleLeadActionClick);
+  $("daily-action-list").addEventListener("click", handleLeadActionClick);
   $("contact-form").addEventListener("submit", handleContactSave);
   $("contact-dialog").addEventListener("keydown", trapDialogFocus);
   $("contact-dialog").addEventListener("close", restoreContactDialogFocus);
@@ -202,9 +203,9 @@ function deleteLead(id) {
     render(); announce("Lead deleted successfully.");
   } catch { announce("The lead could not be deleted. Try again."); }
 }
-function handleLeadListClick(event) {
+function handleLeadActionClick(event) {
   const action = event.target.closest("[data-action]");
-  if (!action || !$("lead-list").contains(action)) return;
+  if (!action || !event.currentTarget.contains(action)) return;
   const card = action.closest("[data-lead-id]");
   const id = card?.dataset.leadId;
   if (!id) return;
@@ -312,12 +313,11 @@ function getFilteredLeads() {
 }
 function sortLeads(a, b) {
   const sort = $("sort-by").value;
-  const followUpRank = (lead) => lead._followUp.dayDifference ?? MISSING_DATE_RANK;
   const stableTieBreak = () => String(a.name || "").localeCompare(String(b.name || ""), undefined, { sensitivity: "base" }) || String(a.id || "").localeCompare(String(b.id || ""));
   let order = 0;
   if (sort === "oldest") order = compareDateRanks(a._createdTime, b._createdTime);
-  else if (sort === "followup-soonest") order = compareDateRanks(followUpRank(a), followUpRank(b));
-  else if (sort === "most-overdue") order = compareDateRanks(followUpRank(a), followUpRank(b));
+  else if (sort === "followup-soonest") order = compareFollowUpSoonest(a, b);
+  else if (sort === "most-overdue") order = compareMostOverdue(a, b);
   else if (sort === "highest-priority") order = a._priorityRank - b._priorityRank;
   else if (sort === "name") order = String(a.name || "").localeCompare(String(b.name || ""), undefined, { sensitivity: "base" });
   else order = compareDateRanks(a._createdTime, b._createdTime, -1);
@@ -345,6 +345,17 @@ function followUpChip(followUp) {
   const exactDate = followUp.exactDate ? ` — ${followUp.exactDate}` : "";
   return `<span class="badge followup-badge followup-${followUp.state}" title="${escapeHtml(followUp.relativeLabel + exactDate)}" aria-label="${escapeHtml(followUp.relativeLabel + exactDate)}">${escapeHtml(followUp.relativeLabel)}</span>`;
 }
+function contactHref(lead, type) {
+  if (type === "phone") return lead.phone && isValidPhone(lead.phone) ? `tel:${encodeURIComponent(normalizePhone(lead.phone))}` : "";
+  return lead.email && isValidEmail(lead.email) ? `mailto:${encodeURIComponent(lead.email)}` : "";
+}
+function lastContactMarkup(lead) {
+  if (!lead.lastContactedAt) return "Not recorded";
+  const exact = formatDateTime(lead.lastContactedAt);
+  const relative = formatRelativeContact(lead.lastContactedAt);
+  const method = lead.lastContactMethod ? ` · ${escapeHtml(lead.lastContactMethod)}` : "";
+  return `<time datetime="${escapeHtml(lead.lastContactedAt)}" title="${exact}" aria-label="Last contacted ${exact}">${escapeHtml(relative)}</time>${method}`;
+}
 function renderDailyActions() {
   const actionLeads = preparedLeads.filter((lead) => {
     const state = lead._followUp.state;
@@ -356,7 +367,12 @@ function renderDailyActions() {
   $("daily-action-empty").classList.toggle("hidden", actionLeads.length > 0);
   $("daily-action-list").innerHTML = actionLeads.map((lead) => {
     const followUp = lead._followUp;
-    return `<article class="daily-action-row"><div class="daily-action-summary"><strong>${escapeHtml(lead.name)}</strong><span class="muted daily-action-detail">${escapeHtml(lead.condition)}</span></div><span class="badge priority-pill priority-${lead.priority.toLowerCase()}">${escapeHtml(lead.priority)}</span>${followUpChip(followUp)}<span class="exact-date">${escapeHtml(followUp.exactDate)}</span></article>`;
+    const id = escapeHtml(lead.id);
+    const phoneUrl = contactHref(lead, "phone");
+    const emailUrl = contactHref(lead, "email");
+    const statusSlug = lead._status.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+    const phone = phoneUrl ? `<a href="${phoneUrl}">${escapeHtml(lead.phone)}</a>` : `<span>${escapeHtml(lead.phone)}</span>`;
+    return `<article class="daily-action-row" data-lead-id="${id}"><div class="daily-action-summary"><strong>${escapeHtml(lead.name)}</strong>${phone}<span class="muted daily-action-detail">Last contact: ${lastContactMarkup(lead)}</span></div><div class="daily-action-badges"><span class="badge status-${statusSlug}">${escapeHtml(lead._status)}</span>${followUpChip(followUp)}</div><div class="daily-action-buttons">${phoneUrl ? `<a class="quick-action" href="${phoneUrl}" aria-label="Call ${escapeHtml(lead.name)}">Call</a>` : '<span class="quick-action unavailable">Call unavailable</span>'}${emailUrl ? `<a class="quick-action" href="${emailUrl}" aria-label="Email ${escapeHtml(lead.name)}">Email</a>` : '<span class="quick-action unavailable">Email unavailable</span>'}<button type="button" data-action="contact">Mark contacted</button><button type="button" class="secondary" data-action="edit">Edit / review</button></div></article>`;
   }).join("");
 }
 function renderLeads() {
@@ -387,10 +403,10 @@ function leadCardMarkup(lead) {
   const followUp = lead._followUp;
   const slug = (value) => value.toLowerCase().replace(/[^a-z0-9]+/g, "-");
   const id = escapeHtml(lead.id);
-  const phoneUrl = lead.phone && isValidPhone(lead.phone) ? `tel:${encodeURIComponent(normalizePhone(lead.phone))}` : "";
-  const emailUrl = lead.email && isValidEmail(lead.email) ? `mailto:${encodeURIComponent(lead.email)}` : "";
+  const phoneUrl = contactHref(lead, "phone");
+  const emailUrl = contactHref(lead, "email");
   const contactLink = (url, label, value) => url ? `<a class="quick-link" href="${url}" aria-label="${label} ${escapeHtml(lead.name)}"><span aria-hidden="true">${label === "Call" ? "☎" : "✉"}</span><span>${label}</span><small>${escapeHtml(value)}</small></a>` : `<span class="contact-unavailable" aria-label="${label} unavailable">${label} unavailable</span>`;
-  return `<article class="lead-card" data-lead-id="${id}"><div class="mobile-summary"><div><h3>${escapeHtml(lead.name)}</h3><div class="summary-chips"><span class="badge priority-pill priority-${lead.priority.toLowerCase()}">${escapeHtml(lead.priority)}</span><span class="badge status-${slug(status)}">${escapeHtml(status)}</span>${followUpChip(followUp)}</div></div><button type="button" class="disclosure-button ghost" data-action="disclose" aria-expanded="false" aria-controls="lead-details-${id}">Show details</button></div><div id="lead-details-${id}" class="lead-card-details"><header><div><h3>${escapeHtml(lead.name)}</h3><p class="condition">${escapeHtml(lead.condition)}</p></div><span class="badge priority-pill priority-${lead.priority.toLowerCase()}">${escapeHtml(lead.priority)}</span></header><div class="badges"><span class="badge status-${slug(status)}">${escapeHtml(status)}</span><span class="badge type-${slug(lead.leadType || "New patient")}">${escapeHtml(lead.leadType || "New patient")}</span>${lead.referralSource ? `<span class="badge referral-badge">${escapeHtml(lead.referralSource)}</span>` : ""}${followUpChip(followUp)}${followUp.exactDate ? `<span class="exact-date">${escapeHtml(followUp.exactDate)}</span>` : ""}</div><div class="contact-actions">${contactLink(phoneUrl, "Call", lead.phone)}${contactLink(emailUrl, "Email", lead.email)}</div><dl class="card-grid"><div><dt>Location</dt><dd>${escapeHtml(lead.location)}</dd></div><div><dt>Created</dt><dd>${formatDateTime(lead.createdAt)}</dd></div><div><dt>Last contact</dt><dd>${lead.lastContactedAt ? `${formatDateTime(lead.lastContactedAt)}${lead.lastContactMethod ? ` · ${escapeHtml(lead.lastContactMethod)}` : ""}` : "Not recorded"}</dd></div><div><dt>Next action</dt><dd>${escapeHtml(lead.nextAction || "None set")}</dd></div></dl>${lead.notes ? `<p class="lead-notes"><strong>Notes:</strong> ${escapeHtml(lead.notes)}</p>` : ""}${activityHistoryMarkup(lead)}<div class="card-actions"><button type="button" data-action="contact">Mark contacted</button><button type="button" class="secondary" data-action="edit">Edit</button><div class="more-actions"><button type="button" class="ghost" data-action="more" aria-expanded="false" aria-haspopup="menu">More <span aria-hidden="true">▾</span></button><div class="more-menu" role="menu" hidden><button type="button" class="danger-action" role="menuitem" data-action="delete">Delete lead</button></div></div></div></div></article>`;
+  return `<article class="lead-card" data-lead-id="${id}"><div class="mobile-summary"><div><h3>${escapeHtml(lead.name)}</h3><div class="summary-chips"><span class="badge priority-pill priority-${lead.priority.toLowerCase()}">${escapeHtml(lead.priority)}</span><span class="badge status-${slug(status)}">${escapeHtml(status)}</span>${followUpChip(followUp)}</div></div><button type="button" class="disclosure-button ghost" data-action="disclose" aria-expanded="false" aria-controls="lead-details-${id}">Show details</button></div><div id="lead-details-${id}" class="lead-card-details"><header><div><h3>${escapeHtml(lead.name)}</h3><p class="condition">${escapeHtml(lead.condition)}</p></div><span class="badge priority-pill priority-${lead.priority.toLowerCase()}">${escapeHtml(lead.priority)}</span></header><div class="badges"><span class="badge status-${slug(status)}">${escapeHtml(status)}</span><span class="badge type-${slug(lead.leadType || "New patient")}">${escapeHtml(lead.leadType || "New patient")}</span>${lead.referralSource ? `<span class="badge referral-badge">${escapeHtml(lead.referralSource)}</span>` : ""}${followUpChip(followUp)}${followUp.exactDate ? `<span class="exact-date">${escapeHtml(followUp.exactDate)}</span>` : ""}</div><div class="contact-actions">${contactLink(phoneUrl, "Call", lead.phone)}${contactLink(emailUrl, "Email", lead.email)}</div><dl class="card-grid"><div><dt>Location</dt><dd>${escapeHtml(lead.location)}</dd></div><div><dt>Created</dt><dd>${formatDateTime(lead.createdAt)}</dd></div><div><dt>Last contact</dt><dd>${lastContactMarkup(lead)}</dd></div><div><dt>Next action</dt><dd>${escapeHtml(lead.nextAction || "None set")}</dd></div></dl>${lead.notes ? `<p class="lead-notes"><strong>Notes:</strong> ${escapeHtml(lead.notes)}</p>` : ""}${activityHistoryMarkup(lead)}<div class="card-actions"><button type="button" data-action="contact">Mark contacted</button><button type="button" class="secondary" data-action="edit">Edit</button><div class="more-actions"><button type="button" class="ghost" data-action="more" aria-expanded="false" aria-haspopup="menu">More <span aria-hidden="true">▾</span></button><div class="more-menu" role="menu" hidden><button type="button" class="danger-action" role="menuitem" data-action="delete">Delete lead</button></div></div></div></div></article>`;
 }
 function formatDateTime(value) { const date = new Date(value); return Number.isNaN(date.getTime()) ? "Unknown" : escapeHtml(date.toLocaleString()); }
 function activityHistoryMarkup(lead) {

@@ -56,9 +56,16 @@ h1, h2, p { margin-top: 0; }
 .daily-actions-heading { margin-bottom: .65rem; }
 .daily-actions-heading h2 { margin-bottom: 0; }
 .daily-action-list { display: grid; gap: .5rem; }
-.daily-action-row { display: grid; grid-template-columns: minmax(180px, 1fr) auto auto minmax(150px, auto); align-items: center; gap: .65rem; padding: .7rem .8rem; border: 1px solid var(--border); border-radius: 18px; background: #fff; }
+.daily-action-row { display: grid; grid-template-columns: minmax(170px, .7fr) minmax(200px, .65fr) minmax(360px, 1.35fr); align-items: center; gap: .75rem; padding: .8rem; border: 1px solid var(--border); border-radius: 18px; background: #fff; }
 .daily-action-summary { display: grid; min-width: 0; }
 .daily-action-summary > * { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.daily-action-summary a { width: fit-content; max-width: 100%; color: var(--primary-dark); }
+.daily-action-badges, .daily-action-buttons { display: flex; flex-wrap: wrap; align-items: center; gap: .45rem; }
+.daily-action-buttons { justify-content: flex-end; }
+.daily-action-buttons button, .quick-action { min-height: 44px; padding: .7rem .85rem; }
+.quick-action { display: inline-grid; place-items: center; border-radius: 999px; background: var(--accent); color: var(--primary-dark); font-weight: 800; text-decoration: none; }
+.quick-action:hover { background: var(--accent-strong); }
+.quick-action.unavailable { color: var(--muted); background: #eceff1; }
 .content-grid > *, .panel, .list-panel { min-width: 0; }
 .panel { padding: 1rem; }
 .panel-heading { display: flex; justify-content: space-between; align-items: center; gap: 1rem; margin-bottom: 1rem; }
@@ -159,6 +166,7 @@ summary { width: fit-content; color: var(--primary-dark); font-weight: 800; curs
   .search-control { grid-column: span 2; }
 }
 @media (max-width: 900px) { .dashboard { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 900px) { .daily-action-row { grid-template-columns: minmax(0, 1fr); } .daily-action-buttons { justify-content: flex-start; } }
 @media (max-width: 760px) and (min-width: 561px) {
   .filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .search-control { grid-column: 1 / -1; }
@@ -189,7 +197,6 @@ summary { width: fit-content; color: var(--primary-dark); font-weight: 800; curs
   .card-actions { display: flex; flex-wrap: wrap; }
   .card-actions > button { flex: 1 1 auto; width: auto; }
   .card-actions .more-actions > button { width: auto; }
-  .daily-action-row { grid-template-columns: minmax(0, 1fr) auto; }
-  .daily-action-detail, .daily-action-row .priority-pill, .daily-action-row .exact-date { display: none; }
+  .daily-action-buttons > * { flex: 1 1 calc(50% - .45rem); text-align: center; }
   .dialog-actions { flex-direction: column-reverse; }
 }

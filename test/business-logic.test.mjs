@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { normalizeStatus, STATUSES } from "../business/status.mjs";
-import { classifyFollowUp } from "../business/follow-up.mjs";
+import { classifyFollowUp, compareFollowUpSoonest, compareMostOverdue, formatRelativeContact } from "../business/follow-up.mjs";
 import { calculateMetrics } from "../business/metrics.mjs";
 import { leadsMatch, normalizeEmailForMatch, normalizePhoneForMatch, phonesMatch } from "../business/duplicates.mjs";
 import { ACTIVITY_TYPES, buildAutomaticActivities } from "../business/activity.mjs";
@@ -22,6 +22,36 @@ test("classifies local calendar boundaries independently of time of day", () => 
   assert.equal(classifyFollowUp("2026-07-30", lateToday).state, "today");
   assert.equal(classifyFollowUp("2026-07-31", lateToday).state, "future");
   assert.equal(classifyFollowUp("2026-02-30", lateToday).state, "none");
+});
+
+test("formats last contact relatively using local calendar days", () => {
+  const now = new Date(2026, 6, 30, 23, 30);
+  assert.equal(formatRelativeContact(new Date(2026, 6, 30, 8), now), "Today");
+  assert.equal(formatRelativeContact(new Date(2026, 6, 29, 23, 59), now), "Yesterday");
+  assert.equal(formatRelativeContact(new Date(2026, 6, 25, 12), now), "5 days ago");
+  assert.equal(formatRelativeContact("not-a-date", now), "Not recorded");
+});
+
+test("Follow-up soonest puts upcoming work before overdue work and missing dates", () => {
+  const leads = [
+    { name: "missing", _followUp: { dayDifference: null } },
+    { name: "long overdue", _followUp: { dayDifference: -8 } },
+    { name: "future", _followUp: { dayDifference: 3 } },
+    { name: "recently overdue", _followUp: { dayDifference: -1 } },
+    { name: "today", _followUp: { dayDifference: 0 } }
+  ];
+  assert.deepEqual(leads.sort(compareFollowUpSoonest).map(({ name }) => name), ["today", "future", "recently overdue", "long overdue", "missing"]);
+});
+
+test("Most overdue puts the longest missed follow-up first, then upcoming work", () => {
+  const leads = [
+    { name: "missing", _followUp: { dayDifference: null } },
+    { name: "today", _followUp: { dayDifference: 0 } },
+    { name: "recently overdue", _followUp: { dayDifference: -1 } },
+    { name: "future", _followUp: { dayDifference: 3 } },
+    { name: "long overdue", _followUp: { dayDifference: -8 } }
+  ];
+  assert.deepEqual(leads.sort(compareMostOverdue).map(({ name }) => name), ["long overdue", "recently overdue", "today", "future", "missing"]);
 });
 
 test("returns zero conversion when there are no tracked outcomes", () => {

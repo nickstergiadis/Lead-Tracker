@@ -34,3 +34,37 @@ export function classifyFollowUp(value, now = new Date()) {
   const exactDate = followUp.date.toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" });
   return { state, dayDifference, relativeLabel, exactDate };
 }
+
+export function formatRelativeContact(value, now = new Date()) {
+  const contact = new Date(value);
+  if (!value || Number.isNaN(contact.getTime())) return "Not recorded";
+  const dayDifference = calendarDayNumber(localDateParts(contact)) - calendarDayNumber(localDateParts(now));
+  if (dayDifference === 0) return "Today";
+  if (dayDifference === -1) return "Yesterday";
+  if (dayDifference === 1) return "Tomorrow";
+  return dayDifference < 0 ? `${Math.abs(dayDifference)} days ago` : `In ${dayDifference} days`;
+}
+
+function followUpRank(lead) {
+  return lead?._followUp?.dayDifference ?? Number.POSITIVE_INFINITY;
+}
+
+export function compareFollowUpSoonest(a, b) {
+  const aRank = followUpRank(a);
+  const bRank = followUpRank(b);
+  if (aRank === bRank) return 0;
+  const aBucket = aRank === Number.POSITIVE_INFINITY ? 2 : aRank >= 0 ? 0 : 1;
+  const bBucket = bRank === Number.POSITIVE_INFINITY ? 2 : bRank >= 0 ? 0 : 1;
+  if (aBucket !== bBucket) return aBucket - bBucket;
+  return aBucket === 0 ? aRank - bRank : bRank - aRank;
+}
+
+export function compareMostOverdue(a, b) {
+  const aRank = followUpRank(a);
+  const bRank = followUpRank(b);
+  if (aRank === bRank) return 0;
+  const aBucket = aRank < 0 ? 0 : 1;
+  const bBucket = bRank < 0 ? 0 : 1;
+  if (aBucket !== bBucket) return aBucket - bBucket;
+  return aRank - bRank;
+}

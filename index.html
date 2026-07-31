@@ -101,7 +101,7 @@
                 <label class="filter-control"><span class="sr-only">Filter by priority</span><select id="filter-priority"><option value="">All priorities</option></select></label>
                 <label class="filter-control"><span class="sr-only">Filter by lead type</span><select id="filter-lead-type"><option value="">New or returning</option></select></label>
                 <label class="filter-control"><span class="sr-only">Filter by next follow-up date</span><input id="filter-followup" type="date" /></label>
-                <label class="filter-control"><span class="sr-only">Sort leads</span><select id="sort-by">
+                <label class="filter-control"><span class="sr-only">Sort leads</span><select id="sort-by" aria-describedby="sort-help">
                   <option value="newest">Newest</option>
                   <option value="oldest">Oldest</option>
                   <option value="followup-soonest">Follow-up soonest</option>
@@ -111,6 +111,7 @@
                 </select></label>
                 <button id="clear-filters" type="button" class="ghost">Clear</button>
               </div>
+              <p id="sort-help" class="hint">Follow-up soonest puts today and upcoming dates first. Most overdue puts the longest-overdue dates first.</p>
             </div>
             <div id="empty-state" class="empty lead-empty-state hidden">
               <h3 id="empty-state-title">No leads match your current filters.</h3>
