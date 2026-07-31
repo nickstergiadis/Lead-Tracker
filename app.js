@@ -356,6 +356,9 @@ function renderDailyActions() {
 function renderLeads() {
   $("result-count").textContent = filteredLeads.length;
   $("empty-state").classList.toggle("hidden", filteredLeads.length > 0);
+  const hasStoredLeads = leads.length > 0;
+  $("empty-state-title").textContent = hasStoredLeads ? "No leads match your current filters." : "No leads yet";
+  $("empty-state-message").textContent = hasStoredLeads ? "Clear or adjust the filters to see more leads." : "Use the form to add your first lead.";
   $("lead-list").innerHTML = filteredLeads.map(leadCardMarkup).join("");
 }
 function renderActiveFilterCount() {
