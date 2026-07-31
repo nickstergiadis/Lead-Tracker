@@ -136,6 +136,9 @@ summary { width: fit-content; color: var(--primary-dark); font-weight: 800; curs
 .activity-list p { margin: .2rem 0 0; }
 .empty { text-align: center; padding: 2rem; border: 1px dashed var(--border); border-radius: 18px; color: var(--muted); }
 .empty.compact { padding: .8rem 1rem; text-align: left; }
+.lead-empty-state { margin-top: -.25rem; padding: 1rem 1.1rem; border-style: solid; background: var(--bg); text-align: left; }
+.lead-empty-state h3 { margin: 0 0 .25rem; color: var(--ink); font-size: 1rem; }
+.lead-empty-state p { margin: 0; font-size: .92rem; }
 .contact-dialog { width: min(520px, calc(100% - 2rem)); padding: 0; border: 1px solid var(--border); border-radius: 24px; color: var(--ink); box-shadow: var(--shadow); }
 .contact-dialog::backdrop { background: rgba(15, 58, 52, .55); }
 .contact-dialog form { display: grid; gap: .75rem; padding: 1.25rem; }

@@ -40,7 +40,7 @@
               <h2 id="daily-actions-title">Needs action today</h2>
             </div>
           </div>
-          <div id="daily-action-empty" class="empty compact hidden">No follow-ups require action today.</div>
+          <div id="daily-action-empty" class="empty compact hidden">No follow-ups due today</div>
           <div id="daily-action-list" class="daily-action-list"></div>
         </section>
 
@@ -112,7 +112,10 @@
                 <button id="clear-filters" type="button" class="ghost">Clear</button>
               </div>
             </div>
-            <div id="empty-state" class="empty hidden">No leads match your current filters.</div>
+            <div id="empty-state" class="empty lead-empty-state hidden">
+              <h3 id="empty-state-title">No leads match your current filters.</h3>
+              <p id="empty-state-message">Clear or adjust the filters to see more leads.</p>
+            </div>
             <div id="lead-list" class="lead-list"></div>
           </section>
         </section>
