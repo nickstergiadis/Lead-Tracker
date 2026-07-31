@@ -1,4 +1,5 @@
 import { normalizeStatus } from "./status.mjs";
+import { normalizeContactMethod } from "./contact-method.mjs";
 
 const toIso8601 = (value) => {
   if (value === undefined || value === null || String(value).trim() === "") return "";
@@ -12,7 +13,7 @@ export const CSV_COLUMNS = Object.freeze([
   ["Priority", "priority"], ["Lead type", "leadType"], ["Referral source", "referralSource"],
   ["Next action", "nextAction"], ["Follow-up date (YYYY-MM-DD)", "nextFollowUp"],
   ["Last contacted date/time (ISO 8601)", (lead) => toIso8601(lead.lastContactedAt)],
-  ["Last contact method", "lastContactMethod"], ["Booked date/time (ISO 8601)", (lead) => toIso8601(lead.bookedAt)],
+  ["Last contact method", (lead) => normalizeContactMethod(lead.lastContactMethod)], ["Booked date/time (ISO 8601)", (lead) => toIso8601(lead.bookedAt)],
   ["Created date/time (ISO 8601)", (lead) => toIso8601(lead.createdAt)]
 ]);
 

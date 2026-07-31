@@ -17,3 +17,17 @@ test("rejects malformed lead backup records before import", () => {
   assert.throws(() => normalizeLead({ ...validLead, status: "Unknown" }), /invalid status/i);
   assert.throws(() => normalizeLead({ ...validLead, activities: [{ type: "Made up" }] }), /invalid activity/i);
 });
+
+test("normalizes legacy contact methods in imported leads and activity history", () => {
+  const normalized = normalizeLead({
+    ...validLead,
+    lastContactMethod: "Phone",
+    activities: [
+      { id: "activity-1", leadId: "lead-1", type: "Contacted", activityAt: "2026-07-30T10:00:00.000Z", contactMethod: "Text" },
+      { id: "activity-2", leadId: "lead-1", type: "Contacted", activityAt: "2026-07-29T10:00:00.000Z", contactMethod: "In person" }
+    ]
+  });
+
+  assert.equal(normalized.lastContactMethod, "Phone call");
+  assert.deepEqual(normalized.activities.map(({ contactMethod }) => contactMethod), ["Text message", "Other"]);
+});
