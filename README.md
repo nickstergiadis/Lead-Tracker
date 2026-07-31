@@ -26,11 +26,13 @@ psql "$DATABASE_URL" -f db/schema.sql
    ```
 
 5. Save the one-time recovery code offline, then immediately remove both bootstrap variables. Bootstrap refuses to run after a usable administrator exists. Sign in and create invitations from authenticated administrator tooling; invitation plaintext is returned only when created.
-6. Deploy. Vercel serves the static frontend and routes `/api/*` to the serverless API.
+6. Verify the target database with `npm run verify:migration`, then deploy the exact commit that was verified. Vercel runs the repository build and serves fingerprinted JavaScript/CSS from `dist/`; HTML is marked `no-store`, so authentication markup cannot retain a stale `app.js`. Explicit rewrites keep registration and recovery on the serverless API.
 
 ## Migrating an existing installation
 
 Back up the database, then run `psql "$DATABASE_URL" -f db/migrations/001_multi_user.sql`. The transaction creates `legacy-admin`, assigns every legacy `primary` lead and activity to that UUID, aborts if any row has an unexpected owner, and only then installs foreign keys. Run the bootstrap command above immediately; it converts that placeholder into the first usable administrator without changing its UUID, preserving ownership.
+
+Run `npm run verify:migration` against the production `DATABASE_URL` after applying the migration and before deploying. A release must not proceed unless that check confirms the authentication tables, non-null UUID ownership columns, and ownership foreign keys. Run the opt-in database integration suite with `TEST_DATABASE_URL=... npm run test:integration`; it creates and removes an isolated PostgreSQL schema.
 
 ## Invitations, recovery, disablement, and lockout
 
