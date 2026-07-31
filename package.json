@@ -9,6 +9,8 @@
     "lint": "eslint app.js api business test scripts eslint.config.mjs",
     "check": "for file in app.js api/index.js business/*.mjs scripts/*.mjs; do node --check \"$file\" || exit; done",
     "build": "node scripts/build.mjs",
+    "test:integration": "node --test test/api-integration.test.mjs",
+    "verify:migration": "node scripts/verify-production-migration.mjs",
     "start": "vercel dev"
   },
   "devDependencies": {
