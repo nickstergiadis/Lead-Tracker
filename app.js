@@ -4,9 +4,9 @@ import { calculateMetrics, isOpenLead } from "./business/metrics.mjs";
 import { normalizeEmailForMatch, normalizePhoneForMatch, phonesMatch } from "./business/duplicates.mjs";
 import { ACTIVITY_TYPES, buildAutomaticActivities } from "./business/activity.mjs";
 import { serializeLeadsToCsv } from "./business/csv.mjs";
+import { applyBackup, createBackup, parseBackup } from "./business/backup.mjs";
 
 const STORAGE_KEY = "restoreAtHomeLeads";
-const BACKUP_VERSION = 1;
 const priorities = ["Low", "Medium", "High"];
 const PRIORITY_RANK = Object.freeze({ High: 0, Medium: 1, Low: 2 });
 const MISSING_DATE_RANK = Number.POSITIVE_INFINITY;
@@ -400,16 +400,14 @@ function exportCsv(rows, filename) {
   link.click(); URL.revokeObjectURL(url);
 }
 function downloadJson(value, filename) { const url = URL.createObjectURL(new Blob([JSON.stringify(value, null, 2)], { type: "application/json" })); Object.assign(document.createElement("a"), { href: url, download: filename }).click(); URL.revokeObjectURL(url); }
-function exportJson() { downloadJson({ format: "restore-at-home-leads", version: BACKUP_VERSION, exportedAt: new Date().toISOString(), leads }, `restore-at-home-leads-${formatLocalCalendarDate()}.json`); announce(`${leads.length} leads exported to JSON.`); }
+function exportJson() { downloadJson(createBackup(leads), `restore-at-home-leads-${formatLocalCalendarDate()}.json`); announce(`${leads.length} leads exported to JSON.`); }
 async function importJson(event) {
   const file = event.target.files?.[0]; event.target.value = ""; if (!file) return;
   try {
     const parsed = JSON.parse(await file.text());
-    if (!parsed || parsed.format !== "restore-at-home-leads" || parsed.version !== BACKUP_VERSION || !Array.isArray(parsed.leads)) throw new TypeError("This is not a supported Restore at Home backup.");
-    const imported = parsed.leads.map(normalizeLead);
-    if (new Set(imported.map((lead) => lead.id)).size !== imported.length) throw new TypeError("The backup contains duplicate lead IDs.");
+    const imported = parseBackup(parsed, normalizeLead);
     const replace = confirm(`Validated ${imported.length} lead records. Select OK to replace current data, or Cancel to merge them with the current ${leads.length} records.`);
-    const next = replace ? imported : [...new Map([...leads, ...imported].map((lead) => [lead.id, lead])).values()];
+    const next = applyBackup(leads, imported, replace ? "replace" : "merge");
     if (!confirm(`${replace ? "Replace" : "Merge"} browser data with ${next.length} validated records? This cannot be undone unless you exported a backup.`)) return;
     localStorage.setItem(STORAGE_KEY, JSON.stringify(next)); storageRecoveryError = ""; leads = next; render(); announce(`${imported.length} leads imported successfully.`);
   } catch (error) { announce(`Import rejected: ${error.message || "invalid JSON"} Existing data was not changed.`); }
