@@ -8,7 +8,7 @@
   </head>
   <body>
     <main class="app-shell">
-      <section id="login-view" class="login-card" aria-labelledby="login-title">
+      <section id="login-view" class="login-card" aria-labelledby="login-title" aria-hidden="false">
         <div class="brand-mark">RAH</div>
         <h1 id="login-title">Restore at Home</h1>
         <p class="muted">Lead tracker for mobile physiotherapy inquiries.</p>
@@ -20,25 +20,46 @@
           <p id="login-error" class="error" role="alert"></p>
           <button type="submit">Sign in</button>
         </form>
-        <div class="auth-links"><button id="show-register" class="link-button" type="button">Register with an invitation</button><button id="show-recover" class="link-button" type="button">Recover account</button></div>
+        <div class="auth-links">
+          <button id="show-register" class="link-button" type="button">Register with an invitation</button>
+          <button id="show-recover" class="link-button" type="button">Recover account</button>
+        </div>
       </section>
 
-      <section id="register-view" class="login-card hidden" aria-labelledby="register-title">
+      <section id="register-view" class="login-card hidden" aria-labelledby="register-title" aria-hidden="true">
         <h1 id="register-title">Create account</h1>
         <form id="register-form" novalidate>
-          <label>Invitation code<input id="register-invitation" maxlength="128" required /></label>
-          <label>Username<input id="register-username" minlength="3" maxlength="32" autocomplete="username" required /></label>
-          <label>Display name<input id="register-display-name" maxlength="100" autocomplete="name" required /></label>
-          <label>Password<input id="register-password" type="password" minlength="12" maxlength="128" autocomplete="new-password" required /></label>
-          <label>Confirm password<input id="register-confirm" type="password" maxlength="128" autocomplete="new-password" required /></label>
-          <p class="muted">Use 12+ characters including upper/lowercase letters, a number, and a symbol.</p><p id="register-error" class="error" role="alert"></p>
-          <button type="submit">Create account</button><button class="ghost auth-back" type="button">Back</button>
+          <label for="register-invitation">Invitation code</label>
+          <input id="register-invitation" maxlength="128" autocomplete="off" required />
+          <label for="register-username">Username</label>
+          <input id="register-username" minlength="3" maxlength="32" autocomplete="username" required />
+          <label for="register-display-name">Display name</label>
+          <input id="register-display-name" minlength="2" maxlength="100" autocomplete="name" required />
+          <label for="register-password">Password</label>
+          <input id="register-password" type="password" minlength="12" maxlength="128" autocomplete="new-password" required />
+          <label for="register-confirm">Confirm password</label>
+          <input id="register-confirm" type="password" minlength="12" maxlength="128" autocomplete="new-password" required />
+          <p class="muted">Use 12+ characters including upper/lowercase letters, a number, and a symbol.</p>
+          <p id="register-error" class="error" role="alert" aria-live="polite"></p>
+          <button id="register-submit" type="submit">Create account</button>
+          <button id="register-back" class="ghost auth-back" type="button">Back to sign in</button>
         </form>
       </section>
-      <section id="recover-view" class="login-card hidden"><h1>Recover account</h1><form id="recover-form">
-        <label>Username<input id="recover-username" maxlength="32" autocomplete="username" required /></label><label>Recovery code<input id="recover-code" maxlength="128" autocomplete="off" required /></label><label>New password<input id="recover-password" type="password" minlength="12" maxlength="128" autocomplete="new-password" required /></label><p id="recover-error" class="error" role="alert"></p><button>Reset password</button><button class="ghost auth-back" type="button">Back</button>
-      </form></section>
-      <section id="recovery-code-view" class="login-card recovery-card hidden"><h1>Save your recovery code</h1><p>This code will never be shown again. Print or download it before continuing.</p><output id="one-time-recovery-code" class="recovery-code"></output><div class="recovery-actions"><button id="print-recovery" type="button">Print</button><button id="download-recovery" type="button" class="secondary">Download text</button></div><label><input id="recovery-saved" type="checkbox" /> I saved this recovery code securely.</label><button id="finish-recovery" type="button" disabled>Continue</button></section>
+      <section id="recover-view" class="login-card hidden" aria-labelledby="recover-title" aria-hidden="true">
+        <h1 id="recover-title">Recover account</h1>
+        <form id="recover-form" novalidate>
+          <label for="recover-username">Username</label>
+          <input id="recover-username" maxlength="32" autocomplete="username" required />
+          <label for="recover-code">Recovery code</label>
+          <input id="recover-code" maxlength="128" autocomplete="off" required />
+          <label for="recover-password">New password</label>
+          <input id="recover-password" type="password" minlength="12" maxlength="128" autocomplete="new-password" required />
+          <p id="recover-error" class="error" role="alert" aria-live="polite"></p>
+          <button id="recover-submit" type="submit">Reset password</button>
+          <button id="recover-back" class="ghost auth-back" type="button">Back to sign in</button>
+        </form>
+      </section>
+      <section id="recovery-code-view" class="login-card recovery-card hidden" aria-labelledby="recovery-code-title" aria-hidden="true"><h1 id="recovery-code-title">Save your recovery code</h1><p>This code will never be shown again. Print or download it before continuing.</p><output id="one-time-recovery-code" class="recovery-code"></output><div class="recovery-actions"><button id="print-recovery" type="button">Print</button><button id="download-recovery" type="button" class="secondary">Download text</button></div><label><input id="recovery-saved" type="checkbox" /> I saved this recovery code securely.</label><button id="finish-recovery" type="button" disabled>Continue</button></section>
 
       <section id="app-view" class="hidden">
         <header class="topbar">

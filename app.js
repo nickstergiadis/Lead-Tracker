@@ -69,7 +69,7 @@ function loadLegacyLeads() {
     return [];
   }
 }
-async function api(path, options = {}) { const response = await fetch(`/api${path}`, { credentials: "same-origin", headers: { "Content-Type": "application/json", ...(options.headers || {}) }, ...options }); if (response.status === 401) { showAuthenticatedView(false); throw new Error("Authentication required"); } const body = await response.json().catch(() => ({})); if (!response.ok) throw Object.assign(new Error(body.error || "Request failed"), { fields: body.fields }); return body; }
+async function api(path, options = {}, { preserveAuthView = false } = {}) { const response = await fetch(`/api${path}`, { credentials: "same-origin", headers: { "Content-Type": "application/json", ...(options.headers || {}) }, ...options }); if (response.status === 401 && !preserveAuthView) { showAuthenticatedView(false); throw new Error("Authentication required"); } const body = await response.json().catch(() => ({})); if (!response.ok) throw Object.assign(new Error(body.error || `Request failed (${response.status})`), { fields: body.fields, status: response.status }); return body; }
 async function refreshLeads() { const result = await api("/leads"); leads = result.leads.map(normalizeLead); render(); }
 function timestampRank(value) {
   const timestamp = new Date(String(value || "")).getTime();
@@ -107,11 +107,12 @@ async function init() {
 }
 function bindEvents() {
   $("login-form").addEventListener("submit", handleLogin);
-  $("show-register").addEventListener("click", () => showAuthPanel("register-view"));
-  $("show-recover").addEventListener("click", () => showAuthPanel("recover-view"));
-  document.querySelectorAll(".auth-back").forEach((button) => button.addEventListener("click", () => showAuthPanel("login-view")));
-  $("register-form").addEventListener("submit", handleRegister);
-  $("recover-form").addEventListener("submit", handleRecover);
+  bindAuthNavigation("show-register", "register-view");
+  bindAuthNavigation("show-recover", "recover-view");
+  bindAuthNavigation("register-back", "login-view");
+  bindAuthNavigation("recover-back", "login-view");
+  bindAuthSubmit("register-form", handleRegister);
+  bindAuthSubmit("recover-form", handleRecover);
   $("recovery-saved").addEventListener("change", (event) => { $("finish-recovery").disabled = !event.target.checked; });
   $("finish-recovery").addEventListener("click", finishRecovery);
   $("print-recovery").addEventListener("click", () => window.print());
@@ -144,6 +145,24 @@ function bindEvents() {
   document.addEventListener("click", closeOpenMenus);
   document.addEventListener("keydown", handleGlobalKeydown);
 }
+function authSetupError(message) {
+  const error = $("login-error");
+  if (error) error.textContent = message;
+  else console.error(message);
+}
+function bindAuthNavigation(controlId, viewId) {
+  const control = $(controlId);
+  if (!control) { authSetupError(`Authentication control #${controlId} is unavailable.`); return; }
+  control.addEventListener("click", () => {
+    if (!$(viewId)) { authSetupError(`The requested authentication form (#${viewId}) is unavailable.`); return; }
+    showAuthPanel(viewId);
+  });
+}
+function bindAuthSubmit(formId, handler) {
+  const form = $(formId);
+  if (!form) { authSetupError(`Authentication form #${formId} is unavailable.`); return; }
+  form.addEventListener("submit", handler);
+}
 function toggleLeadForm() {
   const button = $("add-lead-disclosure");
   const opening = button.getAttribute("aria-expanded") !== "true";
@@ -155,10 +174,29 @@ async function handleLogin(event) {
   event.preventDefault();
   try { await api("/login", { method: "POST", body: JSON.stringify({ username: $("login-username").value, password: $("password").value }) }); currentUser = (await api("/session")).user; $("password").value = ""; showAuthenticatedView(true); await refreshLeads(); } catch { $("login-error").textContent = "Sign-in failed."; }
 }
-function showAuthPanel(id) { ["login-view", "register-view", "recover-view", "recovery-code-view"].forEach((view) => $(view).classList.toggle("hidden", view !== id)); }
+const AUTH_VIEWS = Object.freeze(["login-view", "register-view", "recover-view", "recovery-code-view"]);
+const AUTH_ERRORS = Object.freeze(["login-error", "register-error", "recover-error"]);
+const SENSITIVE_AUTH_FIELDS = Object.freeze({ "login-view": ["password"], "register-view": ["register-invitation", "register-password", "register-confirm"], "recover-view": ["recover-code", "recover-password"], "recovery-code-view": ["one-time-recovery-code"] });
+const AUTH_FOCUS = Object.freeze({ "login-view": "login-username", "register-view": "register-invitation", "recover-view": "recover-username", "recovery-code-view": "one-time-recovery-code" });
+function showAuthPanel(id) {
+  if (!AUTH_VIEWS.includes(id) || !$(id)) { authSetupError(`The requested authentication form (#${id}) is unavailable.`); return false; }
+  for (const viewId of AUTH_VIEWS) {
+    const view = $(viewId);
+    if (!view) { authSetupError(`Authentication view #${viewId} is unavailable.`); continue; }
+    const active = viewId === id;
+    view.classList.toggle("hidden", !active);
+    view.setAttribute("aria-hidden", String(!active));
+    if (!active) for (const fieldId of SENSITIVE_AUTH_FIELDS[viewId] || []) { const field = $(fieldId); if (field) field.value = ""; }
+  }
+  for (const errorId of AUTH_ERRORS) { const error = $(errorId); if (error) error.textContent = ""; }
+  const focusTarget = $(AUTH_FOCUS[id]);
+  if (focusTarget) focusTarget.focus();
+  else authSetupError(`The first field for #${id} is unavailable.`);
+  return true;
+}
 function showRecoveryCode(code, authenticated) { $("one-time-recovery-code").textContent = code; $("recovery-code-view").dataset.authenticated = String(authenticated); $("recovery-saved").checked = false; $("finish-recovery").disabled = true; showAuthPanel("recovery-code-view"); }
-async function handleRegister(event) { event.preventDefault(); $("register-error").textContent = ""; try { const result = await api("/register", { method: "POST", body: JSON.stringify({ invitationCode: $("register-invitation").value, username: $("register-username").value, displayName: $("register-display-name").value, password: $("register-password").value, passwordConfirmation: $("register-confirm").value }) }); $("register-form").reset(); showRecoveryCode(result.recoveryCode, true); } catch (error) { $("register-error").textContent = error.message; } }
-async function handleRecover(event) { event.preventDefault(); try { const result = await api("/recover", { method: "POST", body: JSON.stringify({ username: $("recover-username").value, recoveryCode: $("recover-code").value, newPassword: $("recover-password").value }) }); $("recover-form").reset(); showRecoveryCode(result.recoveryCode, false); } catch { $("recover-error").textContent = "Recovery failed. Check your details or try again later."; } }
+async function handleRegister(event) { event.preventDefault(); const form = event.currentTarget; $("register-error").textContent = ""; if (!form.checkValidity()) { form.reportValidity(); $("register-error").textContent = "Complete every registration field using the requested format."; return; } if ($("register-password").value !== $("register-confirm").value) { $("register-error").textContent = "Passwords must match."; $("register-confirm").focus(); return; } try { const result = await api("/register", { method: "POST", body: JSON.stringify({ invitationCode: $("register-invitation").value, username: $("register-username").value, displayName: $("register-display-name").value, password: $("register-password").value, passwordConfirmation: $("register-confirm").value }) }, { preserveAuthView: true }); if (!result.recoveryCode) throw new Error("Registration succeeded without a recovery code. Contact an administrator before continuing."); form.reset(); showRecoveryCode(result.recoveryCode, true); } catch (error) { $("register-error").textContent = error.message || "Registration failed. Try again later."; } }
+async function handleRecover(event) { event.preventDefault(); const form = event.currentTarget; $("recover-error").textContent = ""; if (!form.checkValidity()) { form.reportValidity(); $("recover-error").textContent = "Complete every recovery field using the requested format."; return; } try { const result = await api("/recover-account", { method: "POST", body: JSON.stringify({ username: $("recover-username").value, recoveryCode: $("recover-code").value, newPassword: $("recover-password").value }) }, { preserveAuthView: true }); if (!result.recoveryCode) throw new Error("Recovery succeeded without a replacement recovery code. Contact an administrator before continuing."); form.reset(); showRecoveryCode(result.recoveryCode, false); } catch (error) { $("recover-error").textContent = error.message || "Recovery failed. Check your details or try again later."; } }
 function downloadRecoveryCode() { const code = $("one-time-recovery-code").textContent; const blob = new Blob([`Restore at Home recovery code\n\n${code}\n\nStore this offline. It can be used only once.\n`], { type: "text/plain" }); const link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = "restore-at-home-recovery-code.txt"; link.click(); setTimeout(() => URL.revokeObjectURL(link.href), 0); }
 async function finishRecovery() { $("one-time-recovery-code").textContent = ""; if ($("recovery-code-view").dataset.authenticated === "true") { showAuthenticatedView(true); await refreshLeads(); } else showAuthPanel("login-view"); }
 async function loadSecurity(forceOpen = false) { $("security-view").classList.toggle("hidden", forceOpen ? false : !$("security-view").classList.contains("hidden")); if ($("security-view").classList.contains("hidden")) return; const result = await api("/security/sessions"); $("session-list").innerHTML = result.sessions.map((session) => `<p>${escapeHtml(session.user_agent || "Unknown device")} — ${session.current ? "current" : "active"}</p>`).join(""); }
@@ -170,7 +208,7 @@ async function createInvitation(event) { event.preventDefault(); const result = 
 async function revokeInvitation(event) { const id = event.target.dataset.invitationId; if (!id) return; await api(`/admin/invitations/${id}`, { method: "DELETE" }); await loadAdmin(); }
 async function disableUser(event) { const id = event.target.dataset.userId; if (!id || !confirm("Disable this account and revoke all sessions?")) return; try { await api(`/admin/users/${id}/disable`, { method: "POST", body: "{}" }); await loadAdmin(); } catch (error) { $("admin-message").textContent = error.message; } }
 function showAuthenticatedView(authed) {
-  if (!authed) showAuthPanel("login-view"); else ["login-view", "register-view", "recover-view", "recovery-code-view"].forEach((id) => $(id).classList.add("hidden"));
+  if (!authed) showAuthPanel("login-view"); else AUTH_VIEWS.forEach((id) => { $(id).classList.add("hidden"); $(id).setAttribute("aria-hidden", "true"); });
   $("app-view").classList.toggle("hidden", !authed);
   if (authed) {
     render();
@@ -477,3 +515,5 @@ async function importBrowserRecords() {
   } catch (error) { announce(error.message || "Import failed; browser data was not changed."); }
 }
 if (typeof document !== "undefined") init();
+
+export { api, bindAuthNavigation, handleRecover, handleRegister, showAuthPanel };
