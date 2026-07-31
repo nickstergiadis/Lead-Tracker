@@ -33,6 +33,11 @@ The built `dist/` directory can be deployed to any static-file host, including V
 - Export all or filtered records to CSV.
 - Export and import validated, versioned JSON backups.
 
+### Follow-up sorting
+
+- **Follow-up soonest** prioritizes actionable upcoming work: today first, then future dates from nearest to farthest. Overdue dates follow from most recently missed to longest overdue, and leads without a follow-up date appear last.
+- **Most overdue** prioritizes accumulated missed work: overdue dates appear first from longest to most recently overdue. Today and future dates follow chronologically, and leads without a follow-up date appear last.
+
 ## Development
 
 The project uses browser-native JavaScript with no runtime dependencies, bundler, transpiler, authentication service, or database. Business rules live in ES modules under `business/`.
