@@ -7,7 +7,6 @@ import { serializeLeadsToCsv } from "./business/csv.mjs";
 import { CONTACT_METHODS, normalizeContactMethod, normalizeLeadContactMethods } from "./business/contact-method.mjs";
 
 const STORAGE_KEY = "restoreAtHomeLeads";
-const BACKUP_VERSION = 1;
 const priorities = ["Low", "Medium", "High"];
 const PRIORITY_RANK = Object.freeze({ High: 0, Medium: 1, Low: 2 });
 const MISSING_DATE_RANK = Number.POSITIVE_INFINITY;
@@ -61,9 +60,13 @@ function loadLeads() {
     return [];
   }
 }
-function saveLeads() {
+function saveLeads(nextLeads) {
   if (storageRecoveryError) throw new Error(storageRecoveryError);
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(leads));
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(nextLeads));
+}
+function commitLeads(nextLeads) {
+  saveLeads(nextLeads);
+  leads = nextLeads;
 }
 function refreshLeads() { leads = loadLeads(); render(); }
 function timestampRank(value) { const timestamp = new Date(String(value || "")).getTime(); return Number.isNaN(timestamp) ? MISSING_DATE_RANK : timestamp; }
@@ -145,9 +148,8 @@ function persistLead({ fields, existingId }) {
     const now = new Date().toISOString();
     const next = { ...fields, id: existing?.id || crypto.randomUUID(), createdAt: existing?.createdAt || now, updatedAt: now, bookedAt: fields.status === "Booked" ? existing?.bookedAt || now : existing?.bookedAt || "", activities: existing?.activities || [] };
     next.activities = [...next.activities, ...buildAutomaticActivities(existing || null, next, { id: () => crypto.randomUUID(), now })];
-    if (existing) leads = leads.map((lead) => lead.id === existing.id ? next : lead);
-    else leads = [next, ...leads];
-    saveLeads();
+    const nextLeads = existing ? leads.map((lead) => lead.id === existing.id ? next : lead) : [next, ...leads];
+    commitLeads(nextLeads);
     resetForm();
     render();
     announce(`${fields.name} ${existing ? "updated" : "created"} successfully.`);
@@ -194,7 +196,11 @@ function editLead(id) {
 function toDateTimeLocal(value) { if (!value) return ""; const date = new Date(value); const offset = date.getTimezoneOffset() * 60000; return Number.isNaN(date.getTime()) ? "" : new Date(date - offset).toISOString().slice(0, 16); }
 function deleteLead(id) {
   if (!confirm("Delete this lead?")) return;
-  try { leads = leads.filter((lead) => lead.id !== id); saveLeads(); render(); announce("Lead deleted successfully."); } catch { announce("The lead could not be deleted. Try again."); }
+  try {
+    const nextLeads = leads.filter((lead) => lead.id !== id);
+    commitLeads(nextLeads);
+    render(); announce("Lead deleted successfully.");
+  } catch { announce("The lead could not be deleted. Try again."); }
 }
 function handleLeadListClick(event) {
   const action = event.target.closest("[data-action]");
@@ -282,8 +288,8 @@ function handleContactSave(event) {
   const contactedAt = contactedDate.toISOString();
   try {
     const activity = { id: crypto.randomUUID(), leadId: id, type: ACTIVITY_TYPES.CONTACTED, activityAt: contactedAt, contactMethod: method, note, createdAt: new Date().toISOString() };
-    leads = leads.map((lead) => lead.id === id ? { ...lead, lastContactedAt: contactedAt, lastContactMethod: method, updatedAt: new Date().toISOString(), activities: [...lead.activities, activity] } : lead);
-    saveLeads();
+    const nextLeads = leads.map((lead) => lead.id === id ? { ...lead, lastContactedAt: contactedAt, lastContactMethod: method, updatedAt: new Date().toISOString(), activities: [...lead.activities, activity] } : lead);
+    commitLeads(nextLeads);
   } catch { $("contact-error").textContent = "Contact activity could not be saved. Try again."; return; }
   closeContactDialog();
   render();
@@ -405,15 +411,22 @@ async function importJson(event) {
   const file = event.target.files?.[0]; event.target.value = ""; if (!file) return;
   try {
     const parsed = JSON.parse(await file.text());
-    if (!parsed || parsed.format !== "restore-at-home-leads" || parsed.version !== BACKUP_VERSION || !Array.isArray(parsed.leads)) throw new TypeError("This is not a supported Restore at Home backup.");
-    const imported = parsed.leads.map(normalizeLead);
-    if (new Set(imported.map((lead) => lead.id)).size !== imported.length) throw new TypeError("The backup contains duplicate lead IDs.");
+    const imported = parseBackup(parsed, normalizeLead);
     const replace = confirm(`Validated ${imported.length} lead records. Select OK to replace current data, or Cancel to merge them with the current ${leads.length} records.`);
-    const next = replace ? imported : [...new Map([...leads, ...imported].map((lead) => [lead.id, lead])).values()];
-    if (!confirm(`${replace ? "Replace" : "Merge"} browser data with ${next.length} validated records? This cannot be undone unless you exported a backup.`)) return;
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(next)); storageRecoveryError = ""; leads = next; render(); announce(`${imported.length} leads imported successfully.`);
+    const nextLeads = replace ? imported : [...new Map([...leads, ...imported].map((lead) => [lead.id, lead])).values()];
+    if (!confirm(`${replace ? "Replace" : "Merge"} browser data with ${nextLeads.length} validated records? This cannot be undone unless you exported a backup.`)) return;
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(nextLeads)); storageRecoveryError = ""; leads = nextLeads; render(); announce(`${imported.length} leads imported successfully.`);
   } catch (error) { announce(`Import rejected: ${error.message || "invalid JSON"} Existing data was not changed.`); }
 }
 if (typeof document !== "undefined") init();
 
-export { normalizeLead };
+const testHooks = {
+  getLeads: () => leads,
+  setLeads(nextLeads) { leads = nextLeads; storageRecoveryError = ""; },
+  persistLead,
+  handleContactSave,
+  deleteLead,
+  importJson
+};
+
+export { normalizeLead, testHooks };

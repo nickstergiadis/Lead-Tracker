@@ -12,6 +12,15 @@ Use **Export JSON** regularly to download a complete backup, including activity 
 
 Because browser storage has no server recovery or automatic synchronization, keep exported backups in an appropriately secured location. The app intentionally provides no cosmetic frontend password: access is controlled only by access to the browser profile and device.
 
+### Backup routine
+
+1. Export JSON at the end of every work session when leads change. For occasional use, export at least weekly.
+2. Move the downloaded file out of Downloads into an encrypted, access-controlled folder that is included in an organization's backed-up storage. Keep at least the latest three dated exports. Do not commit operational backups to this repository.
+3. Once a month, restore the newest export in a separate browser profile (or a temporary, different origin). First test **Replace** against disposable data, then reset the disposable profile, add one distinct lead, and test **Merge**. Confirm notes, next actions, follow-up dates, contact details, statuses, and complete activity histories.
+4. Record the export and restore-test dates in the team's normal operations checklist. Delete test data and downloaded duplicates when the verification is complete.
+
+`test/fixtures/fictional-leads-backup.json` is a version-controlled, fictional test export for restore drills only. It is not an operational backup and contains no real lead data.
+
 ## Use
 
 Open `index.html` from a static web server. For local development:
