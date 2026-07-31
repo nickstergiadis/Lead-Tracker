@@ -7,7 +7,7 @@ export default [
   },
   { files: ["api/**/*.js", "business/**/*.js"], languageOptions: { sourceType: "commonjs", globals: { process: "readonly", console: "readonly", Buffer: "readonly", require: "readonly", module: "readonly" } } },
   { files: ["app.js"], languageOptions: { sourceType: "module", globals: {
-    console: "readonly", document: "readonly", window: "readonly", localStorage: "readonly", crypto: "readonly", fetch: "readonly",
+    console: "readonly", document: "readonly", window: "readonly", localStorage: "readonly", crypto: "readonly",
     Blob: "readonly", URL: "readonly", Option: "readonly", confirm: "readonly", CSS: "readonly",
     requestAnimationFrame: "readonly", scrollTo: "readonly", setTimeout: "readonly"
   } } }
