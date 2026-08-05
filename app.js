@@ -5,6 +5,7 @@ import { normalizeEmailForMatch, normalizePhoneForMatch, phonesMatch } from "./b
 import { ACTIVITY_TYPES, buildAutomaticActivities } from "./business/activity.mjs";
 import { serializeLeadsToCsv } from "./business/csv.mjs";
 import { CONTACT_METHODS, normalizeContactMethod, normalizeLeadContactMethods } from "./business/contact-method.mjs";
+import { BACKUP_VERSION, parseBackup } from "./business/backup.mjs";
 
 const STORAGE_KEY = "restoreAtHomeLeads";
 const priorities = ["Low", "Medium", "High"];
